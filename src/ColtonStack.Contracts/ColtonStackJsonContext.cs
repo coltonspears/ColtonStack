@@ -19,6 +19,7 @@ namespace ColtonStack.Contracts;
 [JsonSerializable(typeof(RegisterWebhookRequest))]
 [JsonSerializable(typeof(WebhookPayload))]
 [JsonSerializable(typeof(AuditEntryDto))]
+[JsonSerializable(typeof(SimulationStateDto))]
 [JsonSerializable(typeof(IReadOnlyList<MessageDto>))]
 [JsonSerializable(typeof(IReadOnlyList<ChannelSummaryDto>))]
 [JsonSerializable(typeof(IReadOnlyList<WebhookRegistrationDto>))]

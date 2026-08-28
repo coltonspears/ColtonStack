@@ -5,52 +5,109 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
         Title="ColtonStack"
-        Width="1280" Height="800"
-        MinWidth="980" MinHeight="620"
+        Width="1340" Height="840"
+        MinWidth="1020" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Background}"
         FontFamily="Segoe UI" FontSize="13">
 
     <Window.Resources>
-        <!-- Sidebar row: channel name, unread badge, latest-message preview -->
+        <!-- Sidebar row: # glyph, name, unread badge, latest-message preview -->
         <DataTemplate x:Key="Template.ChannelItem">
-            <Grid Margin="10,6,10,7">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <DockPanel Grid.Row="0">
-                    <Border DockPanel.Dock="Right" CornerRadius="9" Background="{StaticResource Brush.Accent}" Padding="7,1"
-                            VerticalAlignment="Center"
-                            Visibility="{Binding HasUnread, Converter={StaticResource Converter.BoolToVisibility}}">
-                        <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11" FontWeight="Bold" />
-                    </Border>
-                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                </DockPanel>
-                <TextBlock Grid.Row="1" Text="{Binding Preview}" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+            <Grid Margin="6,2,6,2" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="#" FontWeight="SemiBold" Margin="4,0,7,0"
+                           VerticalAlignment="Top"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock x:Name="NameText" Text="{Binding Name}" TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasUnread}" Value="True">
+                                        <Setter Property="FontWeight" Value="Bold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock x:Name="PreviewText" Text="{Binding Preview}" FontSize="11" Margin="0,1,0,0" TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasUnread}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+                <Border Grid.Column="2" CornerRadius="9" Background="{StaticResource Brush.Accent}" Padding="7,1" VerticalAlignment="Center"
+                        Visibility="{Binding HasUnread, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11" FontWeight="Bold" />
+                </Border>
             </Grid>
         </DataTemplate>
 
-        <!-- Message row: avatar, author header (grouped), body -->
+        <!-- Message row: rounded avatar, grouped author header, body, hover action bar -->
         <DataTemplate x:Key="Template.Message">
-            <Grid Margin="16,3,16,3">
+            <Grid x:Name="RowRoot" Margin="14,2,14,1" Background="Transparent">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="40" />
+                    <ColumnDefinition Width="42" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid Width="36" Height="36" VerticalAlignment="Top" Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
-                    <Ellipse Fill="{Binding AvatarColor}" />
+                <Border Width="36" Height="36" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Top"
+                        Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
                     <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="13"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Grid>
-                <StackPanel Grid.Column="1" Margin="10,0,0,9">
+                </Border>
+                <StackPanel Grid.Column="1" Margin="10,0,0,8">
                     <StackPanel Orientation="Horizontal"
                                 Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
                         <TextBlock Text="{Binding AuthorName}" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding TimeText}" Style="{StaticResource Style.Muted}" Margin="8,1,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,0,0" />
+                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,24,0" />
                 </StackPanel>
+                <Border x:Name="HoverActions" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-12,-6,0"
+                        Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1"
+                        CornerRadius="8" Padding="6,2" Panel.ZIndex="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE76E;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
+                                   Margin="5,2" Cursor="Hand" ToolTip="Add reaction" />
+                        <TextBlock Text="&#xE97A;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
+                                   Margin="5,2" Cursor="Hand" ToolTip="Reply in thread" />
+                        <TextBlock Text="&#xE712;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
+                                   Margin="5,2" Cursor="Hand" ToolTip="More actions" />
+                    </StackPanel>
+                </Border>
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource Brush.RowHover}" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
             </Grid>
         </DataTemplate>
     </Window.Resources>
@@ -63,25 +120,48 @@
 
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="68" />
+                <ColumnDefinition Width="264" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- ============================ Sidebar ============================ -->
-            <Border Grid.Column="0" Background="{StaticResource Brush.Sidebar}">
+            <!-- ============================ Workspace rail ============================ -->
+            <Border Grid.Column="0" Background="{StaticResource Brush.Rail}">
                 <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="16,16,16,10">
-                        <TextBlock Text="ColtonStack" Style="{StaticResource Style.WorkspaceTitle}" />
-                        <TextBlock Text="signed in as Colton" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
+                    <Button DockPanel.Dock="Bottom" Style="{StaticResource Style.RailButton}" Content="&#xE713;" HorizontalAlignment="Center"
+                            Margin="0,4,0,12" ToolTip="Preferences (decorative)" />
+                    <Border DockPanel.Dock="Top" Width="42" Height="42" CornerRadius="11" Background="{StaticResource Brush.Aubergine}"
+                            HorizontalAlignment="Center" Margin="0,14,0,8">
+                        <TextBlock Text="CS" Foreground="White" FontWeight="Bold" FontSize="15"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <Rectangle DockPanel.Dock="Top" Height="1" Fill="{StaticResource Brush.Border}" Margin="16,2,16,10" />
+                    <StackPanel HorizontalAlignment="Center">
+                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE80F;" ToolTip="Home (decorative)" />
+                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE8BD;" ToolTip="Threads (decorative)" />
+                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE716;" ToolTip="People (decorative)" />
                     </StackPanel>
+                </DockPanel>
+            </Border>
 
-                    <Border DockPanel.Dock="Bottom" Margin="12,10,12,12" Padding="0">
+            <!-- ============================ Sidebar ============================ -->
+            <Border Grid.Column="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
+                        <TextBlock Text="Channels" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
+                        <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
+                                Content="&#xE710;" Command="{Binding Channels.ToggleAddChannelCommand}" ToolTip="Create a channel" />
+                    </Grid>
+
+                    <Border DockPanel.Dock="Top" Margin="14,2,14,6"
+                            Visibility="{Binding Channels.IsAddingChannel, Converter={StaticResource Converter.BoolToVisibility}}">
                         <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="＋" Style="{StaticResource Style.PrimaryButton}" Margin="8,0,0,0"
-                                    Command="{Binding Channels.CreateChannelCommand}" />
-                            <TextBox Style="{StaticResource Style.Input}"
-                                     Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged, Delay=200}">
-                                <TextBox.ToolTip>Channel name, then ＋ to create (live via SignalR on every client)</TextBox.ToolTip>
+                            <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Style.IconButton}" Foreground="{StaticResource Brush.Green}"
+                                    Content="&#xE724;" Command="{Binding Channels.CreateChannelCommand}" FontSize="13"
+                                    ToolTip="Create channel" />
+                            <TextBox Style="{StaticResource Style.Input}" FontSize="12"
+                                     Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
                             </TextBox>
                         </DockPanel>
                     </Border>
@@ -95,14 +175,14 @@
             </Border>
 
             <!-- ============================ Conversation ============================ -->
-            <Grid Grid.Column="1">
+            <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="16,12">
+                <Border Grid.Row="0" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="18,12">
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding Chat.TypingIndicator}" VerticalAlignment="Center"
                                    Foreground="{StaticResource Brush.Green}" FontStyle="Italic" FontSize="12">
@@ -129,51 +209,92 @@
                          Style="{StaticResource Style.ChatList}"
                          HorizontalContentAlignment="Stretch" />
 
-                <Border Grid.Row="2" Margin="16" Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" CornerRadius="8" Padding="10,8">
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="Send" Style="{StaticResource Style.PrimaryButton}" Margin="10,0,0,0"
-                                Command="{Binding Chat.SendMessageCommand}" />
-                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="2,0,0,4"
-                                    Visibility="{Binding Chat.IsLoadingHistory, Converter={StaticResource Converter.BoolToVisibility}}">
-                            <TextBlock Text="loading history…" Foreground="{StaticResource Brush.Amber}" FontStyle="Italic" FontSize="11" />
-                        </StackPanel>
-                        <TextBox x:Name="ComposerBox" Style="{StaticResource Style.Input}" Background="Transparent" BorderThickness="0"
-                                 MinHeight="44" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
-                                 Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged, Delay=150}"
-                                 PreviewKeyDown="ComposerBox_OnPreviewKeyDown">
-                            <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
-                        </TextBox>
-                    </DockPanel>
+                <!-- Composer -->
+                <Border Grid.Row="2" Margin="14,4,18,14" CornerRadius="10" Background="{StaticResource Brush.Surface}"
+                        BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" Padding="12,8">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Selection}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <Grid MinHeight="40">
+                            <TextBlock Text="{Binding Chat.ComposerPlaceholder}" Foreground="{StaticResource Brush.TextMuted}" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Chat.Draft}" Value="">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBox x:Name="ComposerBox" Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
+                                     MinHeight="40" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
+                                     Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged, Delay=150}"
+                                     PreviewKeyDown="ComposerBox_OnPreviewKeyDown">
+                                <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
+                            </TextBox>
+                        </Grid>
+                        <Rectangle Height="1" Fill="{StaticResource Brush.Border}" Margin="0,4,0,7" />
+                        <Grid>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="B" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Bold (decorative)" />
+                                <TextBlock Text="I" FontStyle="Italic" FontSize="12" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Italic (decorative)" />
+                                <TextBlock Text="&#xE76E;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Emoji (decorative)" />
+                                <TextBlock Text="&#xE71B;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Link (decorative)" />
+                                <TextBlock Text="&#xE723;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Cursor="Hand" ToolTip="Attach (decorative)" />
+                            </StackPanel>
+                            <Button HorizontalAlignment="Right" Style="{StaticResource Style.PrimaryButton}" Padding="10,5"
+                                    Command="{Binding Chat.SendMessageCommand}" ToolTip="Send (Enter)">
+                                <TextBlock Text="&#xE724;" FontFamily="Segoe MDL2 Assets" FontSize="13" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Grid>
 
         <!-- ============================ Status bar ============================ -->
-        <Border Grid.Row="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="14,6">
-            <DockPanel>
-                <ToggleButton DockPanel.Dock="Right" Style="{StaticResource Style.ChaosToggle}" Content="chaos"
-                              IsChecked="{Binding Status.ChaosEnabled, Mode=TwoWay}"
-                              ToolTip="Make the server fail ~40% of API requests and watch the resilience pipeline work" />
-                <TextBlock DockPanel.Dock="Right" Text="{Binding Status.RetryCountText}" VerticalAlignment="Center"
-                           Foreground="{StaticResource Brush.Amber}" FontSize="11" Margin="0,0,14,0" />
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Ellipse Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Status.Status, Mode=OneWay}">
-                        <Ellipse.Style>
-                            <Style TargetType="Ellipse">
-                                <Setter Property="Fill" Value="{StaticResource Brush.Amber}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Status.Status}" Value="Connected">
-                                        <Setter Property="Fill" Value="{StaticResource Brush.Green}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding Status.Status}" Value="Disconnected">
-                                        <Setter Property="Fill" Value="{StaticResource Brush.Red}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Ellipse.Style>
-                    </Ellipse>
-                    <TextBlock Text="{Binding Status.StatusText}" Foreground="{StaticResource Brush.TextMuted}" FontSize="11" VerticalAlignment="Center" />
+        <Border Grid.Row="1" Grid.ColumnSpan="3" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,7">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <ToggleButton Style="{StaticResource Style.PillToggle}" Content="sim"
+                                  IsChecked="{Binding Status.SimEnabled, Mode=TwoWay}"
+                                  ToolTip="Server-side chat simulator: fake teammates type and post every few seconds" />
+                    <ToggleButton Margin="8,0,0,0" Style="{StaticResource Style.PillToggle}" Content="chaos"
+                                  IsChecked="{Binding Status.ChaosEnabled, Mode=TwoWay}"
+                                  ToolTip="Make the server fail ~40% of API requests and watch the resilience pipeline work" />
                 </StackPanel>
+                <Border DockPanel.Dock="Right" Style="{StaticResource Style.StatusChip}" Margin="0,0,14,0">
+                    <TextBlock Text="{Binding Status.RetryCountText}" Foreground="{StaticResource Brush.Amber}" FontSize="11" />
+                </Border>
+                <Border Style="{StaticResource Style.StatusChip}">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="9" Height="9" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Status.Status, Mode=OneWay}">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource Brush.Amber}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Status.Status}" Value="Connected">
+                                            <Setter Property="Fill" Value="{StaticResource Brush.Green}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status.Status}" Value="Disconnected">
+                                            <Setter Property="Fill" Value="{StaticResource Brush.Red}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding Status.StatusText}" Foreground="{StaticResource Brush.TextMuted}" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
             </DockPanel>
         </Border>
     </Grid>

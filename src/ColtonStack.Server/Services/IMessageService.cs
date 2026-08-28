@@ -14,4 +14,7 @@ public interface IMessageService
     /// smart services; it never saves itself.
     /// </summary>
     Task<MessageDto> SendAsync(long channelId, SendMessageRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Same pipeline, but posting as a specific (non-self) user — used by the chat-activity simulator.</summary>
+    Task<MessageDto> SendAsUserAsync(long channelId, long userId, string text, CancellationToken cancellationToken);
 }

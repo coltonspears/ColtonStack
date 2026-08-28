@@ -42,7 +42,42 @@ public sealed partial class StatusBarViewModel(
     [ObservableProperty]
     public partial bool ChaosEnabled { get; set; }
 
+    /// <summary>Mirrors the server's chat-activity simulator; synced from the server on startup.</summary>
+    [ObservableProperty]
+    public partial bool SimEnabled { get; set; }
+
+    private bool _suppressSimulationToggle;
+
     partial void OnChaosEnabledChanged(bool value) => _ = ToggleChaosOnServerAsync(value);
+
+    partial void OnSimEnabledChanged(bool value)
+    {
+        if (_suppressSimulationToggle)
+        {
+            return;
+        }
+
+        _ = ToggleSimulationOnServerAsync(value);
+    }
+
+    /// <summary>Fetches the simulator's current state so the toggle reflects reality after startup.</summary>
+    public async Task InitializeAsync()
+    {
+        try
+        {
+            var enabled = await api.GetSimulationAsync(CancellationToken.None).ConfigureAwait(false);
+            await dispatcher.InvokeAsync(() =>
+            {
+                _suppressSimulationToggle = true;
+                SimEnabled = enabled;
+                _suppressSimulationToggle = false;
+            }).Task;
+        }
+        catch (Exception ex)
+        {
+            SimulationStateUnknown(ex);
+        }
+    }
 
     // Deliberately not a [RelayCommand]: the toggle's state lives in the checkbox itself.
     private async Task ToggleChaosOnServerAsync(bool enabled)
@@ -56,6 +91,20 @@ public sealed partial class StatusBarViewModel(
         {
             ChaosToggleFailed(ex);
             StatusText = "Chaos toggle failed";
+        }
+    }
+
+    private async Task ToggleSimulationOnServerAsync(bool enabled)
+    {
+        try
+        {
+            await api.SetSimulationAsync(enabled, CancellationToken.None).ConfigureAwait(false);
+            SimulationToggled(enabled);
+        }
+        catch (Exception ex)
+        {
+            SimulationToggleFailed(ex);
+            StatusText = "Simulator toggle failed";
         }
     }
 
@@ -78,4 +127,13 @@ public sealed partial class StatusBarViewModel(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to toggle chaos mode on the server")]
     private partial void ChaosToggleFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Chat simulation toggled to {Enabled}")]
+    private partial void SimulationToggled(bool enabled);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to toggle chat simulation on the server")]
+    private partial void SimulationToggleFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Could not read the simulator state at startup — toggle shows off")]
+    private partial void SimulationStateUnknown(Exception exception);
 }

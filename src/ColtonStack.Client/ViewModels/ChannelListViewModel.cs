@@ -29,8 +29,15 @@ public sealed partial class ChannelListViewModel(
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
+    /// <summary>Shows the inline "create a channel" box under the sidebar section header.</summary>
+    [ObservableProperty]
+    public partial bool IsAddingChannel { get; set; }
+
     [ObservableProperty]
     public partial string NewChannelName { get; set; } = string.Empty;
+
+    [RelayCommand]
+    private void ToggleAddChannel() => IsAddingChannel = !IsAddingChannel;
 
     partial void OnNewChannelNameChanged(string value) => CreateChannelCommand.NotifyCanExecuteChanged();
 
@@ -76,8 +83,13 @@ public sealed partial class ChannelListViewModel(
     private async Task CreateChannelAsync(CancellationToken cancellationToken)
     {
         var name = NewChannelName.Trim();
-        var created = await api.CreateChannelAsync(name, string.Empty, cancellationToken).ConfigureAwait(false);
+        var created = await api.CreateChannelAsync(name, string.Empty, cancellationToken);
+
+        // Deliberately no ConfigureAwait(false): everything below touches the ObservableCollection
+        // and selection state the sidebar binds to, which must run on the dispatcher. (This was
+        // the multi-client "add channel" crash.)
         NewChannelName = string.Empty;
+        IsAddingChannel = false;
 
         // The hub also broadcasts ChannelCreated for our own create; InsertIfMissing dedupes,
         // so this call selects the channel the moment it exists.

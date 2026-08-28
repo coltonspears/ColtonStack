@@ -43,6 +43,11 @@ public partial class App : Application
         messenger.RegisterAll(_host.Services.GetRequiredService<StatusBarViewModel>());
 
         await _host.StartAsync();
+
+        // Reflect the server's simulator state on the status bar toggle (fire-and-forget: the
+        // client works fine even if the server is still down).
+        _ = _host.Services.GetRequiredService<StatusBarViewModel>().InitializeAsync();
+
         _host.Services.GetRequiredService<MainWindow>().Show();
     }
 

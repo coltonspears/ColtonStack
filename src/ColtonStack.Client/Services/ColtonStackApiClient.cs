@@ -78,6 +78,22 @@ public sealed partial class ColtonStackApiClient(
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<bool> GetSimulationAsync(CancellationToken cancellationToken)
+    {
+        var state = await httpClient
+            .GetFromJsonAsync("api/simulation", ColtonStackJsonContext.Default.SimulationStateDto, cancellationToken)
+            .ConfigureAwait(false);
+        return state?.Enabled ?? false;
+    }
+
+    public async Task SetSimulationAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient
+            .PostAsync($"api/simulation/{enabled}", content: null, cancellationToken)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+    }
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Server rejected a message send for channel {ChannelId} with status {StatusCode}")]
     private partial void SendMessageRejected(int statusCode, long channelId);
 

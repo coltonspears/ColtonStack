@@ -1,12 +1,14 @@
+using ColtonStack.Contracts;
 using ColtonStack.Server.Middleware;
 using ColtonStack.Server.Services;
+using ColtonStack.Server.Simulation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 namespace ColtonStack.Server.Endpoints;
 
-/// <summary>Demo controls: the audit trail reader and the chaos switch.</summary>
+/// <summary>Demo controls: the audit trail reader, the chaos switch and the chat simulator.</summary>
 public static class AdminEndpoints
 {
     public static void Map(IEndpointRouteBuilder app)
@@ -23,6 +25,15 @@ public static class AdminEndpoints
         {
             ChaosMiddleware.Enabled = enabled;
             return TypedResults.Ok(new { chaosEnabled = enabled });
+        });
+
+        api.MapGet("/simulation", (SimulationState state) =>
+            TypedResults.Ok(new SimulationStateDto(state.Enabled)));
+
+        api.MapPost("/simulation/{enabled:bool}", (bool enabled, SimulationState state) =>
+        {
+            state.Enabled = enabled;
+            return TypedResults.Ok(new SimulationStateDto(state.Enabled));
         });
     }
 }

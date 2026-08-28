@@ -5,7 +5,9 @@ using ColtonStack.Server.Hubs;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Middleware;
 using ColtonStack.Server.Services;
+using ColtonStack.Server.Simulation;
 using ColtonStack.Server.Webhooks;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Registry;
 using Polly.Retry;
@@ -49,8 +51,18 @@ builder.Services.AddResiliencePipeline(WebhookDispatchService.PipelineName, (Res
 
 builder.Services.AddHttpClient(WebhookDispatchService.HttpClientName);
 
-// The Generic Host manages startup ordering: schema + seed first, dispatcher draining forever.
+// Chat-activity simulator: a configurable background service that makes the workspace feel
+// alive. Its runtime switch starts from config and can be flipped via /api/simulation.
+builder.Services.Configure<SimulationOptions>(builder.Configuration.GetSection("ColtonStack:Simulation"));
+builder.Services.AddSingleton<SimulationState>(sp => new SimulationState
+{
+    Enabled = sp.GetRequiredService<IOptions<SimulationOptions>>().Value.Enabled,
+});
+
+// The Generic Host manages startup ordering: schema + seed first, simulator and webhook
+// dispatcher draining forever.
 builder.Services.AddHostedService<SqliteDatabaseInitializer>();
+builder.Services.AddHostedService<ChatActivitySimulator>();
 builder.Services.AddHostedService<WebhookDispatchService>();
 
 builder.Services.AddSignalR();

@@ -48,10 +48,13 @@ public sealed class MessageService(
         return [.. messages];
     }
 
-    public async Task<MessageDto> SendAsync(
-        long channelId,
-        SendMessageRequest request,
-        CancellationToken cancellationToken)
+    public Task<MessageDto> SendAsync(long channelId, SendMessageRequest request, CancellationToken cancellationToken) =>
+        SaveAsync(channelId, authorUserId: null, request.Text, cancellationToken);
+
+    public Task<MessageDto> SendAsUserAsync(long channelId, long userId, string text, CancellationToken cancellationToken) =>
+        SaveAsync(channelId, authorUserId: userId, text, cancellationToken);
+
+    private async Task<MessageDto> SaveAsync(long channelId, long? authorUserId, string text, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -63,8 +66,12 @@ public sealed class MessageService(
             throw new ChannelNotFoundException(channelId);
         }
 
-        var self = await connection.QuerySingleAsync<UserDto>(
-            "SELECT Id, DisplayName, AvatarColor, IsSelf FROM Users WHERE IsSelf = 1 LIMIT 1").ConfigureAwait(false);
+        var author = authorUserId is { } userId
+            ? await connection.QuerySingleAsync<UserDto>(
+                "SELECT Id, DisplayName, AvatarColor, IsSelf FROM Users WHERE Id = @userId",
+                new { userId }).ConfigureAwait(false)
+            : await connection.QuerySingleAsync<UserDto>(
+                "SELECT Id, DisplayName, AvatarColor, IsSelf FROM Users WHERE IsSelf = 1 LIMIT 1").ConfigureAwait(false);
 
         var messageId = await connection.ExecuteScalarAsync<long>(
             """
@@ -75,8 +82,8 @@ public sealed class MessageService(
             new
             {
                 channelId,
-                UserId = self.Id,
-                request.Text,
+                UserId = author.Id,
+                Text = text,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
             }).ConfigureAwait(false);
 

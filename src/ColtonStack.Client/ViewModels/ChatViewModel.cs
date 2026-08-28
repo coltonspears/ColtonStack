@@ -47,7 +47,13 @@ public sealed partial class ChatViewModel(
 
     public string ChannelTitle => CurrentChannel is { } channel ? $"# {channel.Name}" : "No channel selected";
 
-    partial void OnCurrentChannelChanged(ChannelSummaryDto? value) => OnPropertyChanged(nameof(ChannelTitle));
+    public string ComposerPlaceholder => CurrentChannel is { } channel ? $"Message #{channel.Name}" : "Select a channel to start chatting";
+
+    partial void OnCurrentChannelChanged(ChannelSummaryDto? value)
+    {
+        OnPropertyChanged(nameof(ChannelTitle));
+        OnPropertyChanged(nameof(ComposerPlaceholder));
+    }
 
     partial void OnDraftChanged(string value)
     {
