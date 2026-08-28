@@ -5,7 +5,7 @@ A guided tour with expected outcomes at each step. Start with nothing running.
 ## 0. Setup (before the audience arrives)
 
 ```bash
-dotnet build ColtonStack.sln          # must be 0 warnings — that's part of the demo
+dotnet build ColtonStack.slnx         # must be 0 warnings — that's part of the demo
 dotnet run --project src/ColtonStack.Server        # terminal 1
 dotnet run --project src/ColtonStack.WebhookSink    # terminal 2
 dotnet run --project src/ColtonStack.Client         # terminal 3
@@ -35,6 +35,9 @@ Talking point: open `ChatViewModel` and `ChannelListViewModel` — neither refer
 * `ChatActivitySimulator` on the server — a `BackgroundService` feeding the *same* `MessageService.SendAsUserAsync` pipeline your own sends use; nothing about a simulated message is special.
 * `Contracts/ColtonStackJsonContext.cs` → every DTO serialized by **source-generated** System.Text.Json. Same context on client and server.
 * Server side: `AuditService` / `WebhookDispatchService` → `[LoggerMessage]` compiled logging delegates.
+* `Views/MainWindow.xaml.cs` — the whole file is a constructor. Enter-to-send is a `KeyBinding`, auto-scroll is a reusable attached behavior, and the composition root assigns the DataContext. Nothing in the view to test, mock, or debug.
+* `UiThreadMessenger` — composition over inheritance: a decorator wraps the messenger once at the thread boundary, so SignalR events land on the UI thread and **no view model contains a `Dispatcher`, an event handler, or any threading code at all**.
+* `Server/Data/*Row.cs` + `WebhookEndpoints` — **Dapper.Contrib**: all CRUD (inserts, lookups, deletes, the seeder) is derived from five tiny row classes, zero SQL. Hand-written SQL survives in exactly three read queries that earn it — two joins/aggregates and the audit page.
 
 ## 3. Resilience you can watch (3 min)
 
@@ -77,5 +80,5 @@ Open `src/ColtonStack.Client/Legacy/`:
 
 ## 6. Close
 
-* `dotnet build ColtonStack.sln` — 0 warnings with analyzers at full enforcement, warnings-as-errors, banned APIs.
+* `dotnet build ColtonStack.slnx` — 0 warnings with analyzers at full enforcement, warnings-as-errors, banned APIs.
 * Everything on the slide — MVVM Toolkit, Dapper, MEDI, Generic Host, Resilience — is doing exactly one job each, visibly, with no magic.

@@ -48,7 +48,15 @@ public partial class App : Application
         // client works fine even if the server is still down).
         _ = _host.Services.GetRequiredService<StatusBarViewModel>().InitializeAsync();
 
-        _host.Services.GetRequiredService<MainWindow>().Show();
+        // The window is pure XAML; the composition root hands it its DataContext.
+        var window = _host.Services.GetRequiredService<MainWindow>();
+        window.DataContext = _host.Services.GetRequiredService<MainViewModel>();
+        MainWindow = window;
+        window.Show();
+
+        // Load channels once the window is visible (fire-and-forget: failures surface on the
+        // status bar through the messenger, not as exceptions).
+        _ = _host.Services.GetRequiredService<MainViewModel>().InitializeAsync();
     }
 
     protected override async void OnExit(ExitEventArgs e)
@@ -76,10 +84,12 @@ public partial class App : Application
         builder.Services
             .Configure<ColtonStackOptions>(builder.Configuration.GetSection(ColtonStackOptions.SectionName));
 
-        // One messenger for the whole app. Weak references mean recipients are cleaned up
-        // without anyone unregistering by hand.
-        builder.Services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
-        builder.Services.AddSingleton(_ => Current.Dispatcher);
+        // One messenger for the whole app, wrapped in a decorator (composition, not inheritance)
+        // that delivers every message on the UI thread. Hub callbacks and resilience events are
+        // published from thread-pool threads; because marshaling happens once, here at the
+        // boundary, no view model ever sees a Dispatcher. Weak references mean recipients are
+        // cleaned up without anyone unregistering by hand.
+        builder.Services.AddSingleton<IMessenger>(new UiThreadMessenger(WeakReferenceMessenger.Default));
 
         AddResilientApiClient(builder.Services);
 

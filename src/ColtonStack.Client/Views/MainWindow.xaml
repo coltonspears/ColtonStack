@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:behaviors="clr-namespace:ColtonStack.Client.Behaviors"
         mc:Ignorable="d"
         Title="ColtonStack"
         Width="1340" Height="840"
@@ -203,10 +204,11 @@
                     </DockPanel>
                 </Border>
 
-                <ListBox x:Name="MessagesList" Grid.Row="1"
+                <ListBox Grid.Row="1"
                          ItemsSource="{Binding Chat.Messages}"
                          ItemTemplate="{StaticResource Template.Message}"
                          Style="{StaticResource Style.ChatList}"
+                         behaviors:AutoScrollBehavior.ScrollToNewItem="True"
                          HorizontalContentAlignment="Stretch" />
 
                 <!-- Composer -->
@@ -235,11 +237,16 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBox x:Name="ComposerBox" Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
+                            <TextBox Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
                                      MinHeight="40" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
-                                     Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged, Delay=150}"
-                                     PreviewKeyDown="ComposerBox_OnPreviewKeyDown">
+                                     Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged}">
                                 <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
+                                <TextBox.InputBindings>
+                                    <!-- Plain Enter sends (input bindings run before the TextBox inserts the
+                                         newline); Shift+Enter doesn't match the gesture, so it falls through
+                                         to AcceptsReturn and makes a new line. No code-behind required. -->
+                                    <KeyBinding Key="Enter" Command="{Binding Chat.SendMessageCommand}" />
+                                </TextBox.InputBindings>
                             </TextBox>
                         </Grid>
                         <Rectangle Height="1" Fill="{StaticResource Brush.Border}" Margin="0,4,0,7" />

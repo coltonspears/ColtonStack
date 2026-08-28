@@ -1,14 +1,17 @@
 using ColtonStack.Contracts;
+using ColtonStack.Server.Data;
 using ColtonStack.Server.Infrastructure;
-using ColtonStack.Server.Webhooks;
-using Dapper;
+using Dapper.Contrib.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 namespace ColtonStack.Server.Endpoints;
 
-/// <summary>Register/list/remove webhook endpoints that receive chat events.</summary>
+/// <summary>
+/// Register/list/remove webhook endpoints that receive chat events.
+/// Pure CRUD, so it's all Dapper.Contrib — not a line of SQL in the file.
+/// </summary>
 public static class WebhookEndpoints
 {
     public static void Map(IEndpointRouteBuilder app)
@@ -18,8 +21,10 @@ public static class WebhookEndpoints
         api.MapGet("/", async Task<IResult> (IDbConnectionFactory connections, CancellationToken cancellationToken) =>
         {
             await using var connection = await connections.CreateOpenConnectionAsync(cancellationToken);
-            var webhooks = await connection.QueryAsync<WebhookRegistrationDto>(
-                "SELECT Id, Url, IsActive, CreatedAtUtc FROM Webhooks ORDER BY Id");
+            var rows = await connection.GetAllAsync<WebhookRow>();
+            IReadOnlyList<WebhookRegistrationDto> webhooks = [.. rows
+                .OrderBy(row => row.Id)
+                .Select(row => new WebhookRegistrationDto(row.Id, row.Url, row.IsActive, row.CreatedAtUtc))];
             return TypedResults.Ok(webhooks);
         });
 
@@ -33,25 +38,30 @@ public static class WebhookEndpoints
             }
 
             await using var connection = await connections.CreateOpenConnectionAsync(cancellationToken);
-            var id = await connection.ExecuteScalarAsync<long>(
-                """
-                INSERT INTO Webhooks (Url, Secret, IsActive, CreatedAtUtc)
-                VALUES (@url, @secret, 1, @createdAtUtc);
-                SELECT last_insert_rowid();
-                """,
-                new { url, secret = request.Secret, createdAtUtc = DateTimeOffset.UtcNow });
+            var row = new WebhookRow
+            {
+                Url = url,
+                Secret = request.Secret,
+                IsActive = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            await connection.InsertAsync(row);
 
-            var webhook = await connection.QuerySingleAsync<WebhookRegistrationDto>(
-                "SELECT Id, Url, IsActive, CreatedAtUtc FROM Webhooks WHERE Id = @id",
-                new { id });
-            return TypedResults.Created($"/api/webhooks/{id}", webhook);
+            var webhook = new WebhookRegistrationDto(row.Id, row.Url, row.IsActive, row.CreatedAtUtc);
+            return TypedResults.Created($"/api/webhooks/{row.Id}", webhook);
         });
 
         api.MapDelete("/{id:long}", async Task<IResult> (long id, IDbConnectionFactory connections, CancellationToken cancellationToken) =>
         {
             await using var connection = await connections.CreateOpenConnectionAsync(cancellationToken);
-            var deleted = await connection.ExecuteAsync("DELETE FROM Webhooks WHERE Id = @id", new { id });
-            return deleted == 0 ? TypedResults.NotFound() : TypedResults.NoContent();
+            var row = await connection.GetAsync<WebhookRow>(id);
+            if (row is null)
+            {
+                return TypedResults.NotFound();
+            }
+
+            await connection.DeleteAsync(row);
+            return TypedResults.NoContent();
         });
     }
 }

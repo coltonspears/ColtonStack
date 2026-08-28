@@ -1,8 +1,9 @@
 using System.Net;
 using System.Text.Json;
 using ColtonStack.Contracts;
+using ColtonStack.Server.Data;
 using ColtonStack.Server.Infrastructure;
-using Dapper;
+using Dapper.Contrib.Extensions;
 using Microsoft.Extensions.Hosting;
 using Polly;
 using Polly.Registry;
@@ -54,8 +55,8 @@ public sealed partial class WebhookDispatchService(
     private async Task DispatchAsync(WebhookJob job, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        var webhooks = await connection.QueryAsync<WebhookTarget>(
-            "SELECT Id, Url, Secret FROM Webhooks WHERE IsActive = 1").ConfigureAwait(false);
+        var webhooks = (await connection.GetAllAsync<WebhookRow>().ConfigureAwait(false))
+            .Where(webhook => webhook.IsActive);
 
         var payload = new WebhookPayload(job.EventType, job.Message, DateTimeOffset.UtcNow);
         var body = JsonSerializer.SerializeToUtf8Bytes(payload, ColtonStackJsonContext.Default.WebhookPayload);

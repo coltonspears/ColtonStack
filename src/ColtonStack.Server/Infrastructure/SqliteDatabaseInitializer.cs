@@ -1,5 +1,5 @@
-using ColtonStack.Contracts;
-using Dapper;
+using ColtonStack.Server.Data;
+using Dapper.Contrib.Extensions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -72,8 +72,8 @@ public sealed partial class SqliteDatabaseInitializer(
 
     private async Task SeedIfEmptyAsync(SqliteConnection connection)
     {
-        var userCount = await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM Users").ConfigureAwait(false);
-        if (userCount > 0)
+        var existingUsers = await connection.GetAllAsync<UserRow>().ConfigureAwait(false);
+        if (existingUsers.Any())
         {
             DatabaseAlreadySeeded();
             return;
@@ -82,24 +82,36 @@ public sealed partial class SqliteDatabaseInitializer(
         SeedingWorkspace();
         await using var transaction = await connection.BeginTransactionAsync().ConfigureAwait(false);
 
-        await connection.ExecuteAsync(
-            "INSERT INTO Users (Id, DisplayName, AvatarColor, IsSelf) VALUES (@Id, @Name, @Color, @IsSelf)",
-            SeedData.Users.Select(u => new { u.Id, u.Name, u.Color, u.IsSelf }),
-            transaction).ConfigureAwait(false);
+        // Dapper.Contrib writes each generated id back onto the row, so the maps below connect
+        // seed data to real keys without a single INSERT or subquery being written by hand.
+        var userIdsByName = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var user in SeedData.Users)
+        {
+            var row = new UserRow { DisplayName = user.Name, AvatarColor = user.Color, IsSelf = user.IsSelf };
+            await connection.InsertAsync(row, transaction).ConfigureAwait(false);
+            userIdsByName[user.Name] = row.Id;
+        }
 
-        await connection.ExecuteAsync(
-            "INSERT INTO Channels (Id, Name, Topic) VALUES (@Id, @Name, @Topic)",
-            SeedData.Channels.Select(c => new { c.Id, c.Name, c.Topic }),
-            transaction).ConfigureAwait(false);
+        var channelIdsBySeedId = new Dictionary<long, long>();
+        foreach (var channel in SeedData.Channels)
+        {
+            var row = new ChannelRow { Name = channel.Name, Topic = channel.Topic };
+            await connection.InsertAsync(row, transaction).ConfigureAwait(false);
+            channelIdsBySeedId[channel.Id] = row.Id;
+        }
 
         var now = DateTimeOffset.UtcNow;
-        await connection.ExecuteAsync(
-            """
-            INSERT INTO Messages (ChannelId, UserId, Text, CreatedAtUtc)
-            VALUES (@Channel, (SELECT Id FROM Users WHERE DisplayName = @Author), @Text, @CreatedAtUtc)
-            """,
-            SeedData.Messages.Select(m => new { m.Channel, m.Author, m.Text, CreatedAtUtc = now.AddMinutes(-m.MinutesAgo) }),
-            transaction).ConfigureAwait(false);
+        foreach (var message in SeedData.Messages)
+        {
+            var row = new MessageRow
+            {
+                ChannelId = channelIdsBySeedId[message.Channel],
+                UserId = userIdsByName[message.Author],
+                Text = message.Text,
+                CreatedAtUtc = now.AddMinutes(-message.MinutesAgo),
+            };
+            await connection.InsertAsync(row, transaction).ConfigureAwait(false);
+        }
 
         await transaction.CommitAsync().ConfigureAwait(false);
         SeededWorkspace(SeedData.Users.Length, SeedData.Channels.Length, SeedData.Messages.Length);

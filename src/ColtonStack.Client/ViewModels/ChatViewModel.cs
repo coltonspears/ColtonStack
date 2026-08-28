@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Windows.Threading;
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
 using ColtonStack.Contracts;
@@ -13,12 +12,14 @@ namespace ColtonStack.Client.ViewModels;
 /// <summary>
 /// The active conversation: message history, the composer, live arrivals over SignalR, and the
 /// typing indicator. All state lives in generated partial properties; behavior in commands.
+///
+/// There is deliberately no threading code here: the messenger delivers every message on the
+/// UI thread (see UiThreadMessenger), and commands start on the UI thread and stay there.
 /// </summary>
 public sealed partial class ChatViewModel(
     ColtonStackApiClient api,
     ChatHubClient hub,
     IMessenger messenger,
-    Dispatcher dispatcher,
     ILogger<ChatViewModel> logger) : ObservableObject, IRecipient<ChannelSelectedMessage>, IRecipient<MessagePostedMessage>, IRecipient<UserTypingMessage>, IDisposable
 {
     private static readonly TimeSpan GroupingGap = TimeSpan.FromMinutes(5);
@@ -27,9 +28,6 @@ public sealed partial class ChatViewModel(
 
     private DateTimeOffset? _lastTypingSentAt;
     private CancellationTokenSource? _typingDecay;
-
-    /// <summary>Raised after a message lands; the view auto-scrolls (a view-only concern).</summary>
-    public event EventHandler? MessageArrived;
 
     public ObservableCollection<MessageViewModel> Messages { get; } = [];
 
@@ -74,10 +72,10 @@ public sealed partial class ChatViewModel(
 
         try
         {
-            var saved = await api.SendMessageAsync(channel.Id, text, cancellationToken).ConfigureAwait(false);
+            var saved = await api.SendMessageAsync(channel.Id, text, cancellationToken);
 
             // Show our own copy immediately; when the hub echoes it back, AppendMessage dedupes by id.
-            _ = dispatcher.InvokeAsync(() => AppendMessage(saved));
+            AppendMessage(saved);
         }
         catch (Exception ex)
         {
@@ -92,12 +90,9 @@ public sealed partial class ChatViewModel(
 
     public void Receive(ChannelSelectedMessage message)
     {
-        _ = dispatcher.InvokeAsync(() =>
-        {
-            CurrentChannel = message.Channel;
-            TypingIndicator = string.Empty;
-            Messages.Clear();
-        });
+        CurrentChannel = message.Channel;
+        TypingIndicator = string.Empty;
+        Messages.Clear();
         _ = LoadHistoryAsync(message.Channel);
     }
 
@@ -108,7 +103,7 @@ public sealed partial class ChatViewModel(
             return; // another channel — the sidebar owns the unread badge
         }
 
-        dispatcher.InvokeAsync(() => AppendMessage(message.Message));
+        AppendMessage(message.Message);
     }
 
     public void Receive(UserTypingMessage message)
@@ -118,11 +113,8 @@ public sealed partial class ChatViewModel(
             return;
         }
 
-        _ = dispatcher.InvokeAsync(() =>
-        {
-            TypingIndicator = $"{message.UserDisplayName} is typing…";
-            RestartTypingDecay();
-        });
+        TypingIndicator = $"{message.UserDisplayName} is typing…";
+        RestartTypingDecay();
     }
 
     private async Task LoadHistoryAsync(ChannelSummaryDto? channel)
@@ -135,20 +127,17 @@ public sealed partial class ChatViewModel(
         IsLoadingHistory = true;
         try
         {
-            var history = await api.GetMessagesAsync(channel.Id, afterId: 0, CancellationToken.None).ConfigureAwait(false);
-            _ = dispatcher.InvokeAsync(() =>
+            var history = await api.GetMessagesAsync(channel.Id, afterId: 0, CancellationToken.None);
+            if (CurrentChannel?.Id != channel.Id)
             {
-                if (CurrentChannel?.Id != channel.Id)
-                {
-                    return; // the user switched away while the request was in flight
-                }
+                return; // the user switched away while the request was in flight
+            }
 
-                Messages.Clear();
-                foreach (var message in history)
-                {
-                    AppendMessage(message);
-                }
-            });
+            Messages.Clear();
+            foreach (var message in history)
+            {
+                AppendMessage(message);
+            }
         }
         catch (Exception ex)
         {
@@ -174,7 +163,6 @@ public sealed partial class ChatViewModel(
             || message.CreatedAtUtc - previous.CreatedAtUtc > GroupingGap;
 
         Messages.Add(new MessageViewModel(message, isFirstOfGroup));
-        MessageArrived?.Invoke(this, EventArgs.Empty);
     }
 
     private void NotifyTypingThrottled()
@@ -199,22 +187,21 @@ public sealed partial class ChatViewModel(
         _typingDecay?.Cancel();
         _typingDecay?.Dispose();
         _typingDecay = new CancellationTokenSource();
-        var token = _typingDecay.Token;
+        _ = ClearTypingIndicatorLaterAsync(_typingDecay.Token);
+    }
 
-        _ = Task.Run(
-            async () =>
-            {
-                try
-                {
-                    await Task.Delay(TypingIndicatorDecay, token).ConfigureAwait(false);
-                    await dispatcher.InvokeAsync(() => TypingIndicator = string.Empty).Task.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    // a newer typing notification replaced this one
-                }
-            },
-            CancellationToken.None);
+    private async Task ClearTypingIndicatorLaterAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Started on the UI thread, so the continuation resumes there too.
+            await Task.Delay(TypingIndicatorDecay, cancellationToken);
+            TypingIndicator = string.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            // a newer typing notification replaced this one
+        }
     }
 
     public void Dispose()

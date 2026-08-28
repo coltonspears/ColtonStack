@@ -1,8 +1,9 @@
 using ColtonStack.Contracts;
+using ColtonStack.Server.Data;
 using ColtonStack.Server.Hubs;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Services;
-using Dapper;
+using Dapper.Contrib.Extensions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -102,31 +103,32 @@ public sealed partial class ChatActivitySimulator(
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        var users = (await connection.QueryAsync<(long Id, string DisplayName)>(
-            "SELECT Id, DisplayName FROM Users WHERE IsSelf = 0").ConfigureAwait(false)).ToList();
-        var channelIds = (await connection.QueryAsync<long>(
-            "SELECT Id FROM Channels").ConfigureAwait(false)).ToList();
+        // Both tables hold a handful of demo rows, so Dapper.Contrib's GetAll + LINQ replaces SQL.
+        var teammates = (await connection.GetAllAsync<UserRow>().ConfigureAwait(false))
+            .Where(user => !user.IsSelf)
+            .ToList();
+        var channels = (await connection.GetAllAsync<ChannelRow>().ConfigureAwait(false)).ToList();
 
-        if (users.Count == 0 || channelIds.Count == 0)
+        if (teammates.Count == 0 || channels.Count == 0)
         {
             return;
         }
 
-        var (userId, authorName) = users[Random.Shared.Next(users.Count)];
-        var channelId = channelIds[Random.Shared.Next(channelIds.Count)];
+        var author = teammates[Random.Shared.Next(teammates.Count)];
+        var channelId = channels[Random.Shared.Next(channels.Count)].Id;
         var text = Phrases[Random.Shared.Next(Phrases.Length)];
 
         if (options.Value.SimulateTyping)
         {
             await hubContext.Clients
                 .Group(ChatHub.GroupNameFor(channelId))
-                .UserTypingAsync(channelId, authorName)
+                .UserTypingAsync(channelId, author.DisplayName)
                 .ConfigureAwait(false);
             await Task.Delay(TimeSpan.FromSeconds(Random.Shared.Next(1, 3)), cancellationToken).ConfigureAwait(false);
         }
 
-        await messages.SendAsUserAsync(channelId, userId, text, cancellationToken).ConfigureAwait(false);
-        SimulatedMessage(authorName, channelId);
+        await messages.SendAsUserAsync(channelId, author.Id, text, cancellationToken).ConfigureAwait(false);
+        SimulatedMessage(author.DisplayName, channelId);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Chat simulator started (enabled: {Enabled}, interval {Min}-{Max}s)")]

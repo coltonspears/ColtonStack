@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Windows.Threading;
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
 using ColtonStack.Contracts;
@@ -13,12 +12,13 @@ namespace ColtonStack.Client.ViewModels;
 /// <summary>
 /// The sidebar. Loads channels over HTTP, creates new ones, tracks unread counts — and learns
 /// about activity purely through the messenger, never by being poked from the chat pane.
+/// Every message is delivered on the UI thread (see UiThreadMessenger), so the
+/// ObservableCollection below is only ever touched from the right thread by construction.
 /// </summary>
 public sealed partial class ChannelListViewModel(
     ColtonStackApiClient api,
     ChatHubClient hub,
     IMessenger messenger,
-    Dispatcher dispatcher,
     ILogger<ChannelListViewModel> logger) : ObservableObject, IRecipient<ChannelCreatedMessage>, IRecipient<MessagePostedMessage>
 {
     public ObservableCollection<ChannelListItemViewModel> Channels { get; } = [];
@@ -58,9 +58,6 @@ public sealed partial class ChannelListViewModel(
         IsLoading = true;
         try
         {
-            // Deliberately no ConfigureAwait(false): this method always starts on the UI
-            // thread and its continuation mutates the ObservableCollection the sidebar
-            // binds to, which must happen on the dispatcher.
             var summaries = await api.GetChannelsAsync(cancellationToken);
             var items = summaries.Select(summary => new ChannelListItemViewModel(summary)).ToList();
 
@@ -73,6 +70,11 @@ public sealed partial class ChannelListViewModel(
             SelectedChannel ??= Channels.FirstOrDefault();
             ChannelsLoaded(items.Count);
         }
+        catch (Exception ex)
+        {
+            ChannelsLoadFailed(ex);
+            messenger.Send(new HttpRetryMessage(0, $"Could not load channels: {ex.Message}"));
+        }
         finally
         {
             IsLoading = false;
@@ -83,46 +85,52 @@ public sealed partial class ChannelListViewModel(
     private async Task CreateChannelAsync(CancellationToken cancellationToken)
     {
         var name = NewChannelName.Trim();
-        var created = await api.CreateChannelAsync(name, string.Empty, cancellationToken);
 
-        // Deliberately no ConfigureAwait(false): everything below touches the ObservableCollection
-        // and selection state the sidebar binds to, which must run on the dispatcher. (This was
-        // the multi-client "add channel" crash.)
-        NewChannelName = string.Empty;
-        IsAddingChannel = false;
+        try
+        {
+            var created = await api.CreateChannelAsync(name, string.Empty, cancellationToken);
 
-        // The hub also broadcasts ChannelCreated for our own create; InsertIfMissing dedupes,
-        // so this call selects the channel the moment it exists.
-        var item = InsertIfMissing(created);
-        SelectedChannel = item;
+            NewChannelName = string.Empty;
+            IsAddingChannel = false;
+
+            // The hub also broadcasts ChannelCreated for our own create; InsertIfMissing dedupes,
+            // so this call selects the channel the moment it exists.
+            var item = InsertIfMissing(created);
+            SelectedChannel = item;
+        }
+        catch (Exception ex)
+        {
+            // The name stays in the box so the user can correct it and retry.
+            CreateChannelFailed(ex, name);
+            messenger.Send(new HttpRetryMessage(0, $"Could not create #{name}: {ex.Message}"));
+        }
     }
 
     private bool CanCreateChannel() =>
         NewChannelName.Trim().Length > 0;
 
     public void Receive(ChannelCreatedMessage message) =>
-        _ = dispatcher.InvokeAsync(() => InsertIfMissing(message.Channel));
+        InsertIfMissing(message.Channel);
 
-    public void Receive(MessagePostedMessage message) =>
-        _ = dispatcher.InvokeAsync(() =>
+    public void Receive(MessagePostedMessage message)
+    {
+        var item = Channels.FirstOrDefault(channel => channel.Id == message.Message.ChannelId);
+        if (item is null)
         {
-            var item = Channels.FirstOrDefault(channel => channel.Id == message.Message.ChannelId);
-            if (item is null)
-            {
-                return;
-            }
+            return;
+        }
 
-            item.UpdateFrom(new ChannelSummaryDto(
-                item.Id, item.Name, item.Topic,
-                MessageCount: 0, LastMessageId: message.Message.Id,
-                LastMessageAtUtc: message.Message.CreatedAtUtc,
-                LastMessagePreview: message.Message.Text));
+        item.UpdateFrom(new ChannelSummaryDto(
+            item.Id, item.Name, item.Topic,
+            MessageCount: 0, LastMessageId: message.Message.Id,
+            LastMessageAtUtc: message.Message.CreatedAtUtc,
+            LastMessagePreview: message.Message.Text));
 
-            if (SelectedChannel?.Id != message.Message.ChannelId)
-            {
-                item.UnreadCount++;
-            }
-        });
+        if (SelectedChannel?.Id != message.Message.ChannelId)
+        {
+            item.UnreadCount++;
+        }
+    }
 
     private ChannelListItemViewModel InsertIfMissing(ChannelSummaryDto summary)
     {
@@ -140,4 +148,10 @@ public sealed partial class ChannelListViewModel(
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Loaded {Count} channels")]
     private partial void ChannelsLoaded(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Loading channels failed after retries")]
+    private partial void ChannelsLoadFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Creating channel {Name} failed")]
+    private partial void CreateChannelFailed(Exception exception, string name);
 }

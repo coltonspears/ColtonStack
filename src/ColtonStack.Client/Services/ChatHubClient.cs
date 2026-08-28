@@ -130,7 +130,8 @@ public sealed partial class ChatHubClient(
 
     private void WireHandlers(HubConnection connection)
     {
-        // Hub events arrive on background threads; recipients marshal to the UI thread themselves.
+        // Hub events arrive on background threads; UiThreadMessenger delivers them on the UI
+        // thread, so recipients never marshal anything.
         connection.On<MessageDto>(nameof(IChatHubClient.MessagePostedAsync),
             message => messenger.Send(new MessagePostedMessage(message)));
 

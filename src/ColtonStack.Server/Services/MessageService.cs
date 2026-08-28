@@ -1,8 +1,10 @@
 using ColtonStack.Contracts;
+using ColtonStack.Server.Data;
 using ColtonStack.Server.Hubs;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Webhooks;
 using Dapper;
+using Dapper.Contrib.Extensions;
 using Microsoft.AspNetCore.SignalR;
 
 namespace ColtonStack.Server.Services;
@@ -13,12 +15,17 @@ public sealed class MessageService(
     IHubContext<ChatHub, IChatHubClient> hubContext,
     IWebhookOutbox webhookOutbox) : IMessageService
 {
-    private const string MessageQuerySql = """
+    // The one query in this service that earns hand-written SQL: a paged two-table join.
+    // Every existence check and insert below is Dapper.Contrib CRUD derived from the row classes.
+    private const string MessagePageSql = """
         SELECT m.Id, m.ChannelId, m.UserId,
                u.DisplayName AS AuthorName, u.AvatarColor AS AuthorColor,
                m.Text, m.CreatedAtUtc
         FROM Messages m
         JOIN Users u ON u.Id = m.UserId
+        WHERE m.ChannelId = @channelId AND m.Id > @afterId
+        ORDER BY m.Id
+        LIMIT @limit
         """;
 
     public async Task<IReadOnlyList<MessageDto>> GetRecentAsync(
@@ -29,21 +36,11 @@ public sealed class MessageService(
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        var channelExists = await connection.ExecuteScalarAsync<long?>(
-            "SELECT Id FROM Channels WHERE Id = @channelId",
-            new { channelId }).ConfigureAwait(false);
-        if (channelExists is null)
-        {
-            throw new ChannelNotFoundException(channelId);
-        }
+        _ = await connection.GetAsync<ChannelRow>(channelId).ConfigureAwait(false)
+            ?? throw new ChannelNotFoundException(channelId);
 
         var messages = await connection.QueryAsync<MessageDto>(
-            $"""
-            {MessageQuerySql}
-            WHERE m.ChannelId = @channelId AND m.Id > @afterId
-            ORDER BY m.Id
-            LIMIT @limit
-            """,
+            MessagePageSql,
             new { channelId, afterId, limit }).ConfigureAwait(false);
         return [.. messages];
     }
@@ -58,38 +55,31 @@ public sealed class MessageService(
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        var channelExists = await connection.ExecuteScalarAsync<long?>(
-            "SELECT Id FROM Channels WHERE Id = @channelId",
-            new { channelId }).ConfigureAwait(false);
-        if (channelExists is null)
-        {
-            throw new ChannelNotFoundException(channelId);
-        }
+        _ = await connection.GetAsync<ChannelRow>(channelId).ConfigureAwait(false)
+            ?? throw new ChannelNotFoundException(channelId);
 
+        // Messages from the client have no author id — they're always "us". The user table is a
+        // handful of demo rows, so scanning it in memory beats another hand-written WHERE clause.
         var author = authorUserId is { } userId
-            ? await connection.QuerySingleAsync<UserDto>(
-                "SELECT Id, DisplayName, AvatarColor, IsSelf FROM Users WHERE Id = @userId",
-                new { userId }).ConfigureAwait(false)
-            : await connection.QuerySingleAsync<UserDto>(
-                "SELECT Id, DisplayName, AvatarColor, IsSelf FROM Users WHERE IsSelf = 1 LIMIT 1").ConfigureAwait(false);
+            ? await connection.GetAsync<UserRow>(userId).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"User {userId} does not exist.")
+            : (await connection.GetAllAsync<UserRow>().ConfigureAwait(false)).First(user => user.IsSelf);
 
-        var messageId = await connection.ExecuteScalarAsync<long>(
-            """
-            INSERT INTO Messages (ChannelId, UserId, Text, CreatedAtUtc)
-            VALUES (@channelId, @UserId, @Text, @CreatedAtUtc);
-            SELECT last_insert_rowid();
-            """,
-            new
-            {
-                channelId,
-                UserId = author.Id,
-                Text = text,
-                CreatedAtUtc = DateTimeOffset.UtcNow,
-            }).ConfigureAwait(false);
+        var row = new MessageRow
+        {
+            ChannelId = channelId,
+            UserId = author.Id,
+            Text = text,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        };
 
-        var message = await connection.QuerySingleAsync<MessageDto>(
-            $"{MessageQuerySql} WHERE m.Id = @messageId",
-            new { messageId }).ConfigureAwait(false);
+        // InsertAsync writes the generated key back into row.Id — no follow-up SELECT needed.
+        await connection.InsertAsync(row).ConfigureAwait(false);
+
+        var message = new MessageDto(
+            row.Id, row.ChannelId, author.Id,
+            author.DisplayName, author.AvatarColor,
+            row.Text, row.CreatedAtUtc);
 
         // Composed pipeline — each step is an injected service the record knows nothing about.
         await auditService.RecordAsync(

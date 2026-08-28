@@ -1,8 +1,6 @@
-using System.Windows.Threading;
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Logging;
 
@@ -11,11 +9,11 @@ namespace ColtonStack.Client.ViewModels;
 /// <summary>
 /// Connectivity chip + retry counter + the chaos switch. Subscribes to resilience pipeline
 /// events (retries, send failures) through the messenger — the pipeline in App.xaml.cs has no
-/// direct reference to this class, and this class has none to the pipeline.
+/// direct reference to this class, and this class has none to the pipeline. Messages arrive
+/// on the UI thread (see UiThreadMessenger), so Receive() just sets properties.
 /// </summary>
 public sealed partial class StatusBarViewModel(
     ColtonStackApiClient api,
-    Dispatcher dispatcher,
     ILogger<StatusBarViewModel> logger) : ObservableObject, IRecipient<ConnectionStatusMessage>, IRecipient<HttpRetryMessage>
 {
     [ObservableProperty]
@@ -65,13 +63,11 @@ public sealed partial class StatusBarViewModel(
     {
         try
         {
-            var enabled = await api.GetSimulationAsync(CancellationToken.None).ConfigureAwait(false);
-            await dispatcher.InvokeAsync(() =>
-            {
-                _suppressSimulationToggle = true;
-                SimEnabled = enabled;
-                _suppressSimulationToggle = false;
-            }).Task;
+            var enabled = await api.GetSimulationAsync(CancellationToken.None);
+
+            _suppressSimulationToggle = true;
+            SimEnabled = enabled;
+            _suppressSimulationToggle = false;
         }
         catch (Exception ex)
         {
@@ -84,7 +80,7 @@ public sealed partial class StatusBarViewModel(
     {
         try
         {
-            await api.SetChaosAsync(enabled, CancellationToken.None).ConfigureAwait(false);
+            await api.SetChaosAsync(enabled, CancellationToken.None);
             ChaosToggled(enabled);
         }
         catch (Exception ex)
@@ -98,7 +94,7 @@ public sealed partial class StatusBarViewModel(
     {
         try
         {
-            await api.SetSimulationAsync(enabled, CancellationToken.None).ConfigureAwait(false);
+            await api.SetSimulationAsync(enabled, CancellationToken.None);
             SimulationToggled(enabled);
         }
         catch (Exception ex)
@@ -108,19 +104,17 @@ public sealed partial class StatusBarViewModel(
         }
     }
 
-    public void Receive(ConnectionStatusMessage message) =>
-        dispatcher.InvokeAsync(() =>
-        {
-            Status = message.State;
-            StatusText = message.Detail;
-        });
+    public void Receive(ConnectionStatusMessage message)
+    {
+        Status = message.State;
+        StatusText = message.Detail;
+    }
 
-    public void Receive(HttpRetryMessage message) =>
-        dispatcher.InvokeAsync(() =>
-        {
-            RetryCount++;
-            StatusText = message.Detail.Length == 0 ? $"Retrying (attempt {message.Attempt})…" : message.Detail;
-        });
+    public void Receive(HttpRetryMessage message)
+    {
+        RetryCount++;
+        StatusText = message.Detail.Length == 0 ? $"Retrying (attempt {message.Attempt})…" : message.Detail;
+    }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Chaos mode toggled to {Enabled}")]
     private partial void ChaosToggled(bool enabled);

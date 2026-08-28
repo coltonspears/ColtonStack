@@ -3,15 +3,16 @@ namespace ColtonStack.Server.Infrastructure;
 /// <summary>Static first-run seed data for the demo workspace.</summary>
 public static class SeedData
 {
-    public static readonly (long Id, string Name, string Color, bool IsSelf)[] Users =
+    public static readonly (string Name, string Color, bool IsSelf)[] Users =
     [
-        (1, "Colton", "#E01E5A", true),
-        (2, "Maya Chen", "#2EB67D", false),
-        (3, "Devon Park", "#ECB22E", false),
-        (4, "Riley Fox", "#36C5F0", false),
-        (5, "Priya Nair", "#E8912D", false),
+        ("Colton", "#E01E5A", true),
+        ("Maya Chen", "#2EB67D", false),
+        ("Devon Park", "#ECB22E", false),
+        ("Riley Fox", "#36C5F0", false),
+        ("Priya Nair", "#E8912D", false),
     ];
 
+    /// <summary>Id here is a seed-local key that <see cref="Messages"/> references — the database assigns the real ids.</summary>
     public static readonly (long Id, string Name, string Topic)[] Channels =
     [
         (1, "general", "Company-wide announcements and watercooler chat"),

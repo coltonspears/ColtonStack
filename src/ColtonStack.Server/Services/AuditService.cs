@@ -1,12 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using ColtonStack.Contracts;
+using ColtonStack.Server.Data;
 using ColtonStack.Server.Infrastructure;
 using Dapper;
+using Dapper.Contrib.Extensions;
 
 namespace ColtonStack.Server.Services;
 
-/// <summary>Implementation of <see cref="IAuditService"/>: writes the <c>AuditLog</c> table via Dapper.</summary>
+/// <summary>Implementation of <see cref="IAuditService"/>: writes the <c>AuditLog</c> table.</summary>
 public sealed partial class AuditService(
     IDbConnectionFactory connectionFactory,
     ILogger<AuditService> logger) : IAuditService
@@ -20,32 +22,20 @@ public sealed partial class AuditService(
         JsonTypeInfo<TEntity> entityJsonTypeInfo,
         CancellationToken cancellationToken)
     {
-        var entry = new AuditEntryDto(
-            Id: 0,
-            EntityType: entityType,
-            EntityId: entityId,
-            Action: action,
-            Actor: actor,
-            TimestampUtc: DateTimeOffset.UtcNow,
-            PayloadJson: JsonSerializer.Serialize(entity, entityJsonTypeInfo));
+        var row = new AuditRow
+        {
+            EntityType = entityType,
+            EntityId = entityId,
+            Action = action,
+            Actor = actor,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            PayloadJson = JsonSerializer.Serialize(entity, entityJsonTypeInfo),
+        };
 
         try
         {
             await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await connection.ExecuteAsync(
-                """
-                INSERT INTO AuditLog (EntityType, EntityId, Action, Actor, TimestampUtc, PayloadJson)
-                VALUES (@EntityType, @EntityId, @Action, @Actor, @TimestampUtc, @PayloadJson)
-                """,
-                new
-                {
-                    entry.EntityType,
-                    entry.EntityId,
-                    entry.Action,
-                    entry.Actor,
-                    entry.TimestampUtc,
-                    entry.PayloadJson,
-                }).ConfigureAwait(false);
+            await connection.InsertAsync(row).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -57,6 +47,9 @@ public sealed partial class AuditService(
     public async Task<IReadOnlyList<AuditEntryDto>> GetRecentAsync(int limit, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+        // The audit log grows without bound, so this page stays a real query — the newest N
+        // rows come back without materializing the table.
         var entries = await connection.QueryAsync<AuditEntryDto>(
             """
             SELECT Id, EntityType, EntityId, Action, Actor, TimestampUtc, PayloadJson
