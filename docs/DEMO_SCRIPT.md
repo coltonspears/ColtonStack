@@ -24,6 +24,9 @@ Two client windows, side by side. Both show the seeded workspace: five channels,
 * In client B start typing (don't send). Client A shows "**Colton is typing…**" — a stateless push broadcast, throttled to one call per 2 s.
 * Click the **＋** next to "Channels" in the sidebar, name a channel, press the arrow. It appears **instantly in the other client** — created once, broadcast once, inserted once.
 * Switch B to **#design** and send from A in **#general**: A sees its message; B's **#general** row in the sidebar gets an unread badge and a fresh preview — computed from a `MessagePostedMessage` the sidebar hears on the `WeakReferenceMessenger`, completely decoupled from the chat pane.
+* Select text in the composer and hit **B** / **I** / **S** / code, or pick an emoji from the 😊 popup — Slack-style `*bold*`, `_italic_`, `~strike~`, `` `code` `` markers, rendered with real styling (and clickable links) in the message list.
+* Click the **people** tile on the rail — the workspace directory, loaded from `GET /api/users`.
+* Click the **gear** → Preferences: change your display name and avatar color, Save. It round-trips through the resilience pipeline, persists via a **Dapper.Contrib `UpdateAsync`** (still zero SQL), and the People pane updates through a `ProfileUpdatedMessage` — Settings and People never reference each other. New messages you send carry the new name.
 
 Talking point: open `ChatViewModel` and `ChannelListViewModel` — neither references the other. The only shared thing is immutable message records on the messenger.
 
@@ -37,7 +40,8 @@ Talking point: open `ChatViewModel` and `ChannelListViewModel` — neither refer
 * Server side: `AuditService` / `WebhookDispatchService` → `[LoggerMessage]` compiled logging delegates.
 * `Views/MainWindow.xaml.cs` — the whole file is a constructor. Enter-to-send is a `KeyBinding`, auto-scroll is a reusable attached behavior, and the composition root assigns the DataContext. Nothing in the view to test, mock, or debug.
 * `UiThreadMessenger` — composition over inheritance: a decorator wraps the messenger once at the thread boundary, so SignalR events land on the UI thread and **no view model contains a `Dispatcher`, an event handler, or any threading code at all**.
-* `Server/Data/*Row.cs` + `WebhookEndpoints` — **Dapper.Contrib**: all CRUD (inserts, lookups, deletes, the seeder) is derived from five tiny row classes, zero SQL. Hand-written SQL survives in exactly three read queries that earn it — two joins/aggregates and the audit page.
+* `Server/Data/*Row.cs` + `WebhookEndpoints` — **Dapper.Contrib**: all CRUD (inserts, lookups, deletes, updates like the profile save, the seeder) is derived from five tiny row classes, zero SQL. Hand-written SQL survives in exactly three read queries that earn it — two joins/aggregates and the audit page.
+* `Behaviors/` — every "needs the actual control" feature is a small attached behavior, not code-behind: `ComposerActions` (selection wrapping + caret insertion, one **inherited** `Target` set on the composer root), `MessageTextFormatter` (markup → `Inlines`), `TitleBarTheme` (dark title bar via a **`[LibraryImport]` source-generated** P/Invoke — even interop has no runtime magic).
 
 ## 3. Resilience you can watch (3 min)
 

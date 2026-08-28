@@ -4,13 +4,20 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:behaviors="clr-namespace:ColtonStack.Client.Behaviors"
+        xmlns:views="clr-namespace:ColtonStack.Client.Views"
         mc:Ignorable="d"
         Title="ColtonStack"
         Width="1340" Height="840"
         MinWidth="1020" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Background}"
+        behaviors:TitleBarTheme.IsDark="True"
         FontFamily="Segoe UI" FontSize="13">
+
+    <Window.InputBindings>
+        <!-- Escape dismisses the preferences overlay (a no-op when it isn't open). -->
+        <KeyBinding Key="Escape" Command="{Binding Settings.CloseCommand}" />
+    </Window.InputBindings>
 
     <Window.Resources>
         <!-- Sidebar row: # glyph, name, unread badge, latest-message preview -->
@@ -75,7 +82,9 @@
                         <TextBlock Text="{Binding AuthorName}" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding TimeText}" Style="{StaticResource Style.Muted}" Margin="8,1,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,24,0" />
+                    <!-- Renders *bold*, _italic_, ~strike~, `code` and clickable links -->
+                    <TextBlock behaviors:MessageTextFormatter.FormattedText="{Binding Text}"
+                               TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,24,0" />
                 </StackPanel>
                 <Border x:Name="HoverActions" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-12,-6,0"
                         Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1"
@@ -130,7 +139,7 @@
             <Border Grid.Column="0" Background="{StaticResource Brush.Rail}">
                 <DockPanel>
                     <Button DockPanel.Dock="Bottom" Style="{StaticResource Style.RailButton}" Content="&#xE713;" HorizontalAlignment="Center"
-                            Margin="0,4,0,12" ToolTip="Preferences (decorative)" />
+                            Margin="0,4,0,12" ToolTip="Preferences" Command="{Binding Settings.OpenCommand}" />
                     <Border DockPanel.Dock="Top" Width="42" Height="42" CornerRadius="11" Background="{StaticResource Brush.Aubergine}"
                             HorizontalAlignment="Center" Margin="0,14,0,8">
                         <TextBlock Text="CS" Foreground="White" FontWeight="Bold" FontSize="15"
@@ -138,41 +147,100 @@
                     </Border>
                     <Rectangle DockPanel.Dock="Top" Height="1" Fill="{StaticResource Brush.Border}" Margin="16,2,16,10" />
                     <StackPanel HorizontalAlignment="Center">
-                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE80F;" ToolTip="Home (decorative)" />
-                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE8BD;" ToolTip="Threads (decorative)" />
-                        <Button Style="{StaticResource Style.RailButton}" Content="&#xE716;" ToolTip="People (decorative)" />
+                        <RadioButton Style="{StaticResource Style.RailToggle}" Content="&#xE80F;" ToolTip="Home — channels"
+                                     IsChecked="{Binding ActivePane, Converter={StaticResource Converter.EnumEquals}, ConverterParameter=Channels}" />
+                        <RadioButton Style="{StaticResource Style.RailToggle}" Content="&#xE716;" ToolTip="People — everyone in the workspace"
+                                     IsChecked="{Binding ActivePane, Converter={StaticResource Converter.EnumEquals}, ConverterParameter=People}" />
                     </StackPanel>
                 </DockPanel>
             </Border>
 
             <!-- ============================ Sidebar ============================ -->
             <Border Grid.Column="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,1,0">
-                <DockPanel>
-                    <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
-                        <TextBlock Text="Channels" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
-                        <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
-                                Content="&#xE710;" Command="{Binding Channels.ToggleAddChannelCommand}" ToolTip="Create a channel" />
-                    </Grid>
+                <Grid>
+                    <!-- Channels pane -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ActivePane}" Value="Channels">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
 
-                    <Border DockPanel.Dock="Top" Margin="14,2,14,6"
-                            Visibility="{Binding Channels.IsAddingChannel, Converter={StaticResource Converter.BoolToVisibility}}">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Style.IconButton}" Foreground="{StaticResource Brush.Green}"
-                                    Content="&#xE724;" Command="{Binding Channels.CreateChannelCommand}" FontSize="13"
-                                    ToolTip="Create channel" />
-                            <TextBox Style="{StaticResource Style.Input}" FontSize="12"
-                                     Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged}">
-                                <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
-                            </TextBox>
-                        </DockPanel>
-                    </Border>
+                        <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
+                            <TextBlock Text="Channels" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
+                                    Content="&#xE710;" Command="{Binding Channels.ToggleAddChannelCommand}" ToolTip="Create a channel" />
+                        </Grid>
 
-                    <ListBox ItemsSource="{Binding Channels.Channels}"
-                             SelectedItem="{Binding Channels.SelectedChannel, Mode=TwoWay}"
-                             ItemTemplate="{StaticResource Template.ChannelItem}"
-                             Style="{StaticResource Style.ChannelList}"
-                             HorizontalContentAlignment="Stretch" />
-                </DockPanel>
+                        <Border DockPanel.Dock="Top" Margin="14,2,14,6"
+                                Visibility="{Binding Channels.IsAddingChannel, Converter={StaticResource Converter.BoolToVisibility}}">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Style.IconButton}" Foreground="{StaticResource Brush.Green}"
+                                        Content="&#xE724;" Command="{Binding Channels.CreateChannelCommand}" FontSize="13"
+                                        ToolTip="Create channel" />
+                                <TextBox Style="{StaticResource Style.Input}" FontSize="12"
+                                         Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
+                                </TextBox>
+                            </DockPanel>
+                        </Border>
+
+                        <ListBox ItemsSource="{Binding Channels.Channels}"
+                                 SelectedItem="{Binding Channels.SelectedChannel, Mode=TwoWay}"
+                                 ItemTemplate="{StaticResource Template.ChannelItem}"
+                                 Style="{StaticResource Style.ChannelList}"
+                                 HorizontalContentAlignment="Stretch" />
+                    </DockPanel>
+
+                    <!-- People pane (workspace directory) -->
+                    <DockPanel>
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ActivePane}" Value="People">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+
+                        <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
+                            <TextBlock Text="People" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
+                                    Content="&#xE72C;" Command="{Binding People.LoadCommand}" ToolTip="Refresh" />
+                        </Grid>
+
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding People.People}" Margin="8,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="8,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="32" Height="32" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="12"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Brush.Text}" />
+                                                <TextBlock Text="you" Margin="6,2,0,0" Style="{StaticResource Style.Muted}"
+                                                           Visibility="{Binding IsSelf, Converter={StaticResource Converter.BoolToVisibility}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Grid>
             </Border>
 
             <!-- ============================ Conversation ============================ -->
@@ -211,9 +279,12 @@
                          behaviors:AutoScrollBehavior.ScrollToNewItem="True"
                          HorizontalContentAlignment="Stretch" />
 
-                <!-- Composer -->
+                <!-- Composer. Every toolbar button below (including the emoji tiles inside the
+                     popup) inherits ComposerActions.Target from this Border — one binding,
+                     wrap/insert behavior everywhere, zero code-behind. -->
                 <Border Grid.Row="2" Margin="14,4,18,14" CornerRadius="10" Background="{StaticResource Brush.Surface}"
-                        BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" Padding="12,8">
+                        BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" Padding="12,8"
+                        behaviors:ComposerActions.Target="{Binding ElementName=ComposerBox}">
                     <Border.Style>
                         <Style TargetType="Border">
                             <Style.Triggers>
@@ -237,7 +308,7 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBox Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
+                            <TextBox x:Name="ComposerBox" Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
                                      MinHeight="40" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
                                      Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged}">
                                 <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
@@ -252,11 +323,38 @@
                         <Rectangle Height="1" Fill="{StaticResource Brush.Border}" Margin="0,4,0,7" />
                         <Grid>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="B" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Bold (decorative)" />
-                                <TextBlock Text="I" FontStyle="Italic" FontSize="12" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Italic (decorative)" />
-                                <TextBlock Text="&#xE76E;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Emoji (decorative)" />
-                                <TextBlock Text="&#xE71B;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,14,0" Cursor="Hand" ToolTip="Link (decorative)" />
-                                <TextBlock Text="&#xE723;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}" Cursor="Hand" ToolTip="Attach (decorative)" />
+                                <Button Style="{StaticResource Style.FormatButton}" FontWeight="Bold" Content="B"
+                                        behaviors:ComposerActions.Wrap="*" ToolTip="Bold — wraps the selection in *asterisks*" />
+                                <Button Style="{StaticResource Style.FormatButton}" FontStyle="Italic" Content="I" Margin="2,0,0,0"
+                                        behaviors:ComposerActions.Wrap="_" ToolTip="Italic — wraps the selection in _underscores_" />
+                                <Button Style="{StaticResource Style.FormatButton}" Margin="2,0,0,0"
+                                        behaviors:ComposerActions.Wrap="~" ToolTip="Strikethrough — wraps the selection in ~tildes~">
+                                    <TextBlock Text="S" TextDecorations="Strikethrough" />
+                                </Button>
+                                <Button Style="{StaticResource Style.FormatButton}" FontFamily="Segoe MDL2 Assets" Content="&#xE943;" Margin="2,0,0,0"
+                                        behaviors:ComposerActions.Wrap="`" ToolTip="Code — wraps the selection in `backticks`" />
+                                <Rectangle Width="1" Height="16" Fill="{StaticResource Brush.Border}" Margin="8,0" VerticalAlignment="Center" />
+                                <ToggleButton x:Name="EmojiToggle" Style="{StaticResource Style.IconToggle}" Content="&#xE76E;" ToolTip="Emoji" />
+                                <Popup IsOpen="{Binding IsChecked, ElementName=EmojiToggle, Mode=TwoWay}" StaysOpen="False"
+                                       PlacementTarget="{Binding ElementName=EmojiToggle}" Placement="Top"
+                                       AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="-6">
+                                    <Border Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}"
+                                            BorderThickness="1" CornerRadius="10" Padding="8">
+                                        <ItemsControl ItemsSource="{x:Static views:EmojiCatalog.All}" Width="272">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Style="{StaticResource Style.EmojiButton}" Content="{Binding}"
+                                                            behaviors:ComposerActions.Insert="{Binding}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Border>
+                                </Popup>
                             </StackPanel>
                             <Button HorizontalAlignment="Right" Style="{StaticResource Style.PrimaryButton}" Padding="10,5"
                                     Command="{Binding Chat.SendMessageCommand}" ToolTip="Send (Enter)">
@@ -304,5 +402,61 @@
                 </Border>
             </DockPanel>
         </Border>
+
+        <!-- ============================ Preferences overlay ============================ -->
+        <!-- Loaded from and saved to the server (Dapper.Contrib UPDATE); Escape or Cancel closes. -->
+        <Grid Grid.RowSpan="2" Visibility="{Binding Settings.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
+            <Border Background="#B3000000" />
+            <Border Width="400" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Background="{StaticResource Brush.Background}" BorderBrush="{StaticResource Brush.Border}"
+                    BorderThickness="1" CornerRadius="12" Padding="22,18">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Text="Preferences" Style="{StaticResource Style.WorkspaceTitle}" FontSize="16" VerticalAlignment="Center" />
+                        <Button HorizontalAlignment="Right" Style="{StaticResource Style.IconButton}" Content="&#xE711;"
+                                Command="{Binding Settings.CloseCommand}" ToolTip="Close (Esc)" />
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <Border Width="44" Height="44" CornerRadius="10" Background="{Binding Settings.AvatarColor}">
+                            <TextBlock Text="{Binding Settings.Initials}" Foreground="White" FontWeight="SemiBold" FontSize="15"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="How you appear across the workspace." Foreground="{StaticResource Brush.Text}" FontSize="12" />
+                            <TextBlock Text="Saved on the server — it survives restarts." Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Display name" Style="{StaticResource Style.SectionHeader}" Margin="0,16,0,6" />
+                    <TextBox Style="{StaticResource Style.Input}" MaxLength="40"
+                             Text="{Binding Settings.DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <TextBlock Text="Avatar color" Style="{StaticResource Style.SectionHeader}" Margin="0,14,0,6" />
+                    <ListBox Style="{StaticResource Style.SwatchList}"
+                             ItemsSource="{Binding Settings.Palette}"
+                             SelectedItem="{Binding Settings.AvatarColor, Mode=TwoWay}" />
+
+                    <TextBlock Text="{Binding Settings.ErrorText}" Foreground="{StaticResource Brush.Red}" FontSize="12"
+                               TextWrapping="Wrap" Margin="0,10,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Settings.ErrorText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                        <Button Content="Cancel" Style="{StaticResource Style.GhostButton}" Command="{Binding Settings.CloseCommand}" />
+                        <Button Content="Save" Style="{StaticResource Style.PrimaryButton}" MinWidth="72" Margin="8,0,0,0"
+                                Command="{Binding Settings.SaveCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

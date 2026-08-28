@@ -70,6 +70,32 @@ public sealed partial class ColtonStackApiClient(
         return channel ?? throw new InvalidOperationException("The server returned an empty channel.");
     }
 
+    public async Task<IReadOnlyList<UserDto>> GetUsersAsync(CancellationToken cancellationToken)
+    {
+        var users = await httpClient
+            .GetFromJsonAsync("api/users", ColtonStackJsonContext.Default.IReadOnlyListUserDto, cancellationToken)
+            .ConfigureAwait(false);
+        return users ?? [];
+    }
+
+    public async Task<UserDto> UpdateProfileAsync(string displayName, string avatarColor, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient
+            .PutAsJsonAsync("api/users/me", new UpdateProfileRequest(displayName, avatarColor), ColtonStackJsonContext.Default.UpdateProfileRequest, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            UpdateProfileRejected((int)response.StatusCode);
+            throw new HttpRequestException($"Saving the profile failed ({(int)response.StatusCode} {response.StatusCode}).");
+        }
+
+        var user = await response.Content
+            .ReadFromJsonAsync(ColtonStackJsonContext.Default.UserDto, cancellationToken)
+            .ConfigureAwait(false);
+        return user ?? throw new InvalidOperationException("The server returned an empty profile.");
+    }
+
     public async Task SetChaosAsync(bool enabled, CancellationToken cancellationToken)
     {
         using var response = await httpClient
@@ -99,4 +125,7 @@ public sealed partial class ColtonStackApiClient(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Server rejected channel creation for '{Name}' with status {StatusCode}")]
     private partial void CreateChannelRejected(int statusCode, string name);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Server rejected the profile update with status {StatusCode}")]
+    private partial void UpdateProfileRejected(int statusCode);
 }

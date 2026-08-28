@@ -6,6 +6,8 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Description>ColtonStack desktop client — MVVM Toolkit + Generic Host + SignalR demo.</Description>
+    <!-- Only for [LibraryImport]-generated marshalling (TitleBarTheme's DWM call) — no hand-written unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

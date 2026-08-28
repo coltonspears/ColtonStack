@@ -41,6 +41,7 @@ public partial class App : Application
         messenger.RegisterAll(_host.Services.GetRequiredService<ChatViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<ChannelListViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<StatusBarViewModel>());
+        messenger.RegisterAll(_host.Services.GetRequiredService<PeopleViewModel>());
 
         await _host.StartAsync();
 
@@ -102,6 +103,8 @@ public partial class App : Application
         builder.Services.AddSingleton<ChannelListViewModel>();
         builder.Services.AddSingleton<ChatViewModel>();
         builder.Services.AddSingleton<StatusBarViewModel>();
+        builder.Services.AddSingleton<PeopleViewModel>();
+        builder.Services.AddSingleton<SettingsViewModel>();
         builder.Services.AddSingleton<MainViewModel>();
         builder.Services.AddSingleton<MainWindow>();
 

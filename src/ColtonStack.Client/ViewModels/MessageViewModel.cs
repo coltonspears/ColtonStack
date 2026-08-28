@@ -24,12 +24,7 @@ public sealed class MessageViewModel(MessageDto message, bool isFirstOfGroup)
     /// <summary>Consecutive messages by the same author collapse into one visual group.</summary>
     public bool IsFirstOfGroup { get; } = isFirstOfGroup;
 
-    public string Initials { get; } = string.Concat(
-        message.AuthorName
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Take(2)
-            .Select(part => part[0]))
-        .ToUpperInvariant();
+    public string Initials { get; } = NameInitials.From(message.AuthorName);
 
     public string TimeText { get; } = message.CreatedAtUtc.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 }

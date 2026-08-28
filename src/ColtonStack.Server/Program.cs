@@ -74,6 +74,7 @@ app.UseMiddleware<ChaosMiddleware>();
 app.MapGet("/health", () => TypedResults.Ok(new { status = "healthy" }));
 
 ChatEndpoints.Map(app);
+UserEndpoints.Map(app);
 WebhookEndpoints.Map(app);
 AdminEndpoints.Map(app);
 
