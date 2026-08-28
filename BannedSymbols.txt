@@ -1,0 +1,30 @@
+; Banned API list for Microsoft.CodeAnalysis.BannedApiAnalyzers.
+; Every entry here is a compile ERROR in this solution (TreatWarningsAsErrors).
+;
+; Rationale: the legacy codebase relied on runtime reflection magic and sync-over-async,
+; which produced runtime crashes and deadlocks. This list makes those whole categories of
+; code impossible to write here. The only file allowed to use reflection APIs is the
+; Client/Legacy/ contrast sample, which suppresses RS0030 with a loud comment.
+;
+; Format: DocumentationId;Message shown at the call site
+
+; --- Sync-over-async: deadlocks and thread-pool starvation ---
+P:System.Threading.Tasks.Task`1.Result;Do not block on .Result — use await.
+M:System.Threading.Tasks.Task.Wait;Do not block — use await.
+M:System.Threading.Tasks.Task.WaitAll;Do not block — use await Task.WhenAll.
+M:System.Threading.Tasks.Task.WaitAny;Do not block — use await Task.WhenAny.
+M:System.Runtime.CompilerServices.TaskAwaiter.GetResult;Do not block — use await.
+M:System.Runtime.CompilerServices.ValueTaskAwaiter`1.GetResult;Do not block — use await.
+M:System.Runtime.CompilerServices.ValueTaskAwaiter.GetResult;Do not block — use await.
+M:System.Threading.Thread.Sleep;Do not sleep threads — use await Task.Delay.
+M:System.Net.Http.HttpClient.Send;Use SendAsync — synchronous HTTP calls are banned.
+
+; --- Runtime reflection magic: the thing this demo exists to retire ---
+M:System.Activator.CreateInstance;Reflection instantiation is banned — use DI or a source generator.
+M:System.Reflection.Assembly.GetTypes;Reflection assembly scanning is banned.
+M:System.Reflection.MethodInfo.Invoke;Reflection invocation is banned — call the method directly.
+M:System.Reflection.FieldInfo.SetValue;Reflection mutation is banned.
+M:System.Reflection.PropertyInfo.SetValue;Reflection mutation is banned — property setters are for real code paths.
+M:System.Type.GetProperties;Reflection property scanning is banned — only Client/Legacy/ may use it (see its pragmas).
+M:System.Type.GetProperty;Reflection property lookup by string is banned — mistyped names must be compile errors.
+M:System.Type.GetMethod;Reflection method lookup by string is banned — mistyped names must be compile errors.

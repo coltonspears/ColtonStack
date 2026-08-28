@@ -1,0 +1,180 @@
+<Window x:Class="ColtonStack.Client.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="ColtonStack"
+        Width="1280" Height="800"
+        MinWidth="980" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Brush.Background}"
+        FontFamily="Segoe UI" FontSize="13">
+
+    <Window.Resources>
+        <!-- Sidebar row: channel name, unread badge, latest-message preview -->
+        <DataTemplate x:Key="Template.ChannelItem">
+            <Grid Margin="10,6,10,7">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <DockPanel Grid.Row="0">
+                    <Border DockPanel.Dock="Right" CornerRadius="9" Background="{StaticResource Brush.Accent}" Padding="7,1"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding HasUnread, Converter={StaticResource Converter.BoolToVisibility}}">
+                        <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11" FontWeight="Bold" />
+                    </Border>
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock Grid.Row="1" Text="{Binding Preview}" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </DataTemplate>
+
+        <!-- Message row: avatar, author header (grouped), body -->
+        <DataTemplate x:Key="Template.Message">
+            <Grid Margin="16,3,16,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="40" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid Width="36" Height="36" VerticalAlignment="Top" Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <Ellipse Fill="{Binding AvatarColor}" />
+                    <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="13"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Grid>
+                <StackPanel Grid.Column="1" Margin="10,0,0,9">
+                    <StackPanel Orientation="Horizontal"
+                                Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
+                        <TextBlock Text="{Binding AuthorName}" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding TimeText}" Style="{StaticResource Style.Muted}" Margin="8,1,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,0,0" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ============================ Sidebar ============================ -->
+            <Border Grid.Column="0" Background="{StaticResource Brush.Sidebar}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="16,16,16,10">
+                        <TextBlock Text="ColtonStack" Style="{StaticResource Style.WorkspaceTitle}" />
+                        <TextBlock Text="signed in as Colton" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
+                    </StackPanel>
+
+                    <Border DockPanel.Dock="Bottom" Margin="12,10,12,12" Padding="0">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="＋" Style="{StaticResource Style.PrimaryButton}" Margin="8,0,0,0"
+                                    Command="{Binding Channels.CreateChannelCommand}" />
+                            <TextBox Style="{StaticResource Style.Input}"
+                                     Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged, Delay=200}">
+                                <TextBox.ToolTip>Channel name, then ＋ to create (live via SignalR on every client)</TextBox.ToolTip>
+                            </TextBox>
+                        </DockPanel>
+                    </Border>
+
+                    <ListBox ItemsSource="{Binding Channels.Channels}"
+                             SelectedItem="{Binding Channels.SelectedChannel, Mode=TwoWay}"
+                             ItemTemplate="{StaticResource Template.ChannelItem}"
+                             Style="{StaticResource Style.ChannelList}"
+                             HorizontalContentAlignment="Stretch" />
+                </DockPanel>
+            </Border>
+
+            <!-- ============================ Conversation ============================ -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="16,12">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Chat.TypingIndicator}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource Brush.Green}" FontStyle="Italic" FontSize="12">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Chat.TypingIndicator}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Chat.ChannelTitle}" Foreground="{StaticResource Brush.TextStrong}" FontSize="16" FontWeight="Bold" />
+                            <TextBlock Text="{Binding Chat.CurrentChannel.Topic}" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <ListBox x:Name="MessagesList" Grid.Row="1"
+                         ItemsSource="{Binding Chat.Messages}"
+                         ItemTemplate="{StaticResource Template.Message}"
+                         Style="{StaticResource Style.ChatList}"
+                         HorizontalContentAlignment="Stretch" />
+
+                <Border Grid.Row="2" Margin="16" Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Send" Style="{StaticResource Style.PrimaryButton}" Margin="10,0,0,0"
+                                Command="{Binding Chat.SendMessageCommand}" />
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="2,0,0,4"
+                                    Visibility="{Binding Chat.IsLoadingHistory, Converter={StaticResource Converter.BoolToVisibility}}">
+                            <TextBlock Text="loading history…" Foreground="{StaticResource Brush.Amber}" FontStyle="Italic" FontSize="11" />
+                        </StackPanel>
+                        <TextBox x:Name="ComposerBox" Style="{StaticResource Style.Input}" Background="Transparent" BorderThickness="0"
+                                 MinHeight="44" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
+                                 Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged, Delay=150}"
+                                 PreviewKeyDown="ComposerBox_OnPreviewKeyDown">
+                            <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
+                        </TextBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ============================ Status bar ============================ -->
+        <Border Grid.Row="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="14,6">
+            <DockPanel>
+                <ToggleButton DockPanel.Dock="Right" Style="{StaticResource Style.ChaosToggle}" Content="chaos"
+                              IsChecked="{Binding Status.ChaosEnabled, Mode=TwoWay}"
+                              ToolTip="Make the server fail ~40% of API requests and watch the resilience pipeline work" />
+                <TextBlock DockPanel.Dock="Right" Text="{Binding Status.RetryCountText}" VerticalAlignment="Center"
+                           Foreground="{StaticResource Brush.Amber}" FontSize="11" Margin="0,0,14,0" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Status.Status, Mode=OneWay}">
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse">
+                                <Setter Property="Fill" Value="{StaticResource Brush.Amber}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Status.Status}" Value="Connected">
+                                        <Setter Property="Fill" Value="{StaticResource Brush.Green}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status.Status}" Value="Disconnected">
+                                        <Setter Property="Fill" Value="{StaticResource Brush.Red}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                    <TextBlock Text="{Binding Status.StatusText}" Foreground="{StaticResource Brush.TextMuted}" FontSize="11" VerticalAlignment="Center" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,46 @@
+<Project>
+
+  <!--
+    Shared build settings for every project in the solution.
+
+    The rules here are the "developer experience" half of the demo:
+      * TreatWarningsAsErrors + full analyzer coverage means the classes of bugs the old
+        reflection-powered code let slip to runtime (typos, blocking calls, magic strings)
+        now fail the build instead.
+      * BannedSymbols.txt (referenced per-project via AdditionalFiles) makes reflection
+        plumbing and sync-over-async outright compile errors — see that file for the list.
+  -->
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Layer-aware opt-outs (documented, deliberate):
+         ConfigureAwait(false) belongs in services/libraries; in WPF UI code it must NOT be
+         used because continuations need to return to the dispatcher. No analyzer can tell
+         the layers apart, so both rules are globally disabled and the convention is applied
+         by hand: ConfigureAwait(false) appears throughout Server/ and client services, and
+         nowhere in ViewModels/ or Views/. -->
+    <NoWarn>$(NoWarn);CA2007;MA0004</NoWarn>
+
+    <!-- VSTHRD001 assumes VS-extensibility threading (JoinableTaskFactory). In a plain WPF
+         app, Dispatcher.InvokeAsync is the correct marshaling tool; suppressed globally. -->
+    <NoWarn>$(NoWarn);VSTHRD001</NoWarn>
+
+    <!-- Fire-and-forget is explicit in this codebase via `_ = SomeAsync()` — used only where
+         the callee handles its own errors (try/catch inside, or UI-thread marshaling that
+         cannot throw). MA0134/VSTHRD110 reject the discard idiom itself, so both are off. -->
+    <NoWarn>$(NoWarn);MA0134;VSTHRD110</NoWarn>
+
+    <!-- WPF's markup compiler builds a temporary project; without this flag that project
+         omits package-provided source generators (LoggerMessage, MVVM Toolkit, ...), which
+         breaks the build with confusing "generated member not found" errors. -->
+    <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
+  </PropertyGroup>
+
+</Project>
