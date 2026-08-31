@@ -8,18 +8,12 @@ using Microsoft.AspNetCore.Routing;
 
 namespace ColtonStack.Server.Endpoints;
 
-/// <summary>Demo controls: the audit trail reader, the chaos switch and the chat simulator.</summary>
+/// <summary>Demo controls: the chaos switch and the chat simulator. (The audit reader moved into the audit server extension.)</summary>
 public static class AdminEndpoints
 {
     public static void Map(IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api");
-
-        api.MapGet("/audit", async Task<IResult> (int limit, IAuditService audit, CancellationToken cancellationToken) =>
-        {
-            var entries = await audit.GetRecentAsync(limit <= 0 ? 50 : Math.Min(limit, 500), cancellationToken);
-            return TypedResults.Ok(entries);
-        });
 
         api.MapPost("/chaos/{enabled:bool}", (bool enabled) =>
         {

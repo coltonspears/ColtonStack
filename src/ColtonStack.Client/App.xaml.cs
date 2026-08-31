@@ -1,10 +1,12 @@
 using System.Windows;
 using ColtonStack.Client.Configuration;
+using ColtonStack.Client.Extensions;
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
 using ColtonStack.Client.ViewModels;
 using ColtonStack.Client.Views;
 using CommunityToolkit.Mvvm.Messaging;
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,9 +23,16 @@ namespace ColtonStack.Client;
 /// <summary>
 /// The WPF entry point hosts the app in the same Generic Host used by the ASP.NET Core server:
 /// one composition root, one DI container, one configuration/logging stack — no service locator.
+///
+/// The client extension list lives here: the single compile-checked place that decides which
+/// extensions are installed. Each one registers services, sidebar panes and its own XAML.
 /// </summary>
 public partial class App : Application
 {
+    private static readonly IClientStartup[] ClientExtensions = [new CorePanesExtension(), new AuditPaneExtension()];
+
+    private static readonly List<string> ExtensionResources = [];
+
     private IHost? _host;
 
 #pragma warning disable VSTHRD100 // WPF lifecycle overrides are void; awaiting here is the app's actual entry point.
@@ -32,6 +41,16 @@ public partial class App : Application
         base.OnStartup(e);
 
         _host = BuildHost();
+
+        // Extension XAML (implicit DataTemplates for pane view models) merges before any
+        // window renders, so a pane's template is always resolvable.
+        foreach (var source in ExtensionResources)
+        {
+            Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri(source, UriKind.Absolute),
+            });
+        }
 
         // The composition root wires messenger subscriptions: each view model declares what it
         // handles via IRecipient<T>, and here every one is handed to the messenger. Weak
@@ -42,8 +61,13 @@ public partial class App : Application
         messenger.RegisterAll(_host.Services.GetRequiredService<ChannelListViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<StatusBarViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<PeopleViewModel>());
+        messenger.RegisterAll(_host.Services.GetRequiredService<DiagnosticsViewModel>());
 
         await _host.StartAsync();
+
+        // Panes build their content lazily through the DI provider — hand the registry its
+        // provider now that the container exists.
+        _host.Services.GetRequiredService<SidebarPaneRegistry>().Attach(_host.Services);
 
         // Reflect the server's simulator state on the status bar toggle (fire-and-forget: the
         // client works fine even if the server is still down).
@@ -55,8 +79,8 @@ public partial class App : Application
         MainWindow = window;
         window.Show();
 
-        // Load channels once the window is visible (fire-and-forget: failures surface on the
-        // status bar through the messenger, not as exceptions).
+        // Select the first pane once the window is visible (fire-and-forget: failures surface
+        // on the status bar through the messenger, not as exceptions).
         _ = _host.Services.GetRequiredService<MainViewModel>().InitializeAsync();
     }
 
@@ -82,6 +106,12 @@ public partial class App : Application
 
         builder.Logging.AddDebug();
 
+        // In-app diagnostics: the same ILogger stream also lands on the messenger, so the
+        // slide-over panel can show retries, hub reconnects and failures live. One provider,
+        // one boundary — nothing else knows the panel exists.
+        var messenger = new UiThreadMessenger(WeakReferenceMessenger.Default);
+        builder.Logging.AddProvider(new DiagnosticsLoggerProvider(messenger));
+
         builder.Services
             .Configure<ColtonStackOptions>(builder.Configuration.GetSection(ColtonStackOptions.SectionName));
 
@@ -90,7 +120,16 @@ public partial class App : Application
         // published from thread-pool threads; because marshaling happens once, here at the
         // boundary, no view model ever sees a Dispatcher. Weak references mean recipients are
         // cleaned up without anyone unregistering by hand.
-        builder.Services.AddSingleton<IMessenger>(new UiThreadMessenger(WeakReferenceMessenger.Default));
+        builder.Services.AddSingleton<IMessenger>(messenger);
+
+        // FluentValidation validators — shared with the server through the Contracts project.
+        // The same UpdateProfileRequestValidator runs client-side (CanExecute / SaveAsync)
+        // and server-side (the PUT /me endpoint).
+        builder.Services.AddValidatorsFromAssemblyContaining<Contracts.UpdateProfileRequestValidator>();
+
+        // Sidebar panes: the registry the extensions fill. The shell never hardcodes a pane;
+        // it binds to whatever was registered, sorted by explicit order.
+        RegisterClientExtensions(builder.Services);
 
         AddResilientApiClient(builder.Services);
 
@@ -105,10 +144,30 @@ public partial class App : Application
         builder.Services.AddSingleton<StatusBarViewModel>();
         builder.Services.AddSingleton<PeopleViewModel>();
         builder.Services.AddSingleton<SettingsViewModel>();
+        builder.Services.AddSingleton<DiagnosticsViewModel>();
         builder.Services.AddSingleton<MainViewModel>();
         builder.Services.AddSingleton<MainWindow>();
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Phase 1 of the client extension contract: each registered extension adds services,
+    /// sidebar panes and XAML sources before the container is built. The collected resource
+    /// dictionaries are merged into Application.Resources in OnStartup.
+    /// </summary>
+    private static void RegisterClientExtensions(IServiceCollection services)
+    {
+        var paneRegistry = new SidebarPaneRegistry();
+        services.AddSingleton(paneRegistry);
+
+        var extensionContext = new ClientStartupContext(services, paneRegistry);
+        foreach (var extension in ClientExtensions)
+        {
+            extension.Configure(extensionContext);
+        }
+
+        ExtensionResources.AddRange(extensionContext.ResourceDictionaries);
     }
 
     /// <summary>

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+    <Description>Unit tests for ColtonStack — proving the modern architecture is testable without a database, UI thread, or reflection.</Description>
+
+    <!-- The tests project is intentionally excluded from the product's analyzer rules:
+         BannedApiAnalyzers would prevent the architecture tests from inspecting the Legacy/
+         folder's reflection patterns, and the WPF threading analyzers don't apply to unit
+         test threads. -->
+    <NoWarn>$(NoWarn);RS0030;VSTHRD100;VSTHRD010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ColtonStack.Client\ColtonStack.Client.csproj" />
+    <ProjectReference Include="..\ColtonStack.Contracts\ColtonStack.Contracts.csproj" />
+    <ProjectReference Include="..\ColtonStack.Server\ColtonStack.Server.csproj" />
+  </ItemGroup>
+
+</Project>

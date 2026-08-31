@@ -29,6 +29,7 @@ public sealed partial class ChatHubClient(
     private readonly CancellationTokenSource _stopping = new();
     private HubConnection? _connection;
     private long? _joinedChannelId;
+    private bool _hasConnectedOnce;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -55,8 +56,17 @@ public sealed partial class ChatHubClient(
         var connection = _connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync(ChatHubMethods.JoinChannel, channelId).ConfigureAwait(false);
-            JoinedChannel(channelId);
+            try
+            {
+                await connection.InvokeAsync(ChatHubMethods.JoinChannel, channelId).ConfigureAwait(false);
+                JoinedChannel(channelId);
+            }
+            catch (Exception ex)
+            {
+                // The connection could drop between the state check and InvokeAsync;
+                // the reconnect loop handles re-joining automatically.
+                JoinChannelFailed(ex, channelId);
+            }
         }
     }
 
@@ -83,32 +93,9 @@ public sealed partial class ChatHubClient(
 
             WireHandlers(connection);
 
-            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            connection.Closed += _ =>
-            {
-                closed.TrySetResult();
-                return Task.CompletedTask;
-            };
-
             try
             {
-                await connection.StartAsync(_stopping.Token).ConfigureAwait(false);
-                _connection = connection;
-                Publish(ConnectionState.Connected, "Connected to ColtonStack");
-                HubConnected();
-
-                if (_joinedChannelId is { } channel)
-                {
-                    await JoinChannelAsync(channel).ConfigureAwait(false);
-                }
-
-                // Park until the connection drops, then loop around and rebuild.
-                await closed.Task.ConfigureAwait(false);
-                _connection = null;
-                if (!_stopping.IsCancellationRequested)
-                {
-                    Publish(ConnectionState.Reconnecting, "Connection lost — reconnecting…");
-                }
+                await RunConnectionAsync(connection).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -125,6 +112,50 @@ public sealed partial class ChatHubClient(
             {
                 break;
             }
+        }
+    }
+
+    /// <summary>
+    /// One connection's lifetime: start, re-apply the channel group, publish reconnect news,
+    /// then park until the connection drops so the loop can rebuild it.
+    /// </summary>
+    private async Task RunConnectionAsync(HubConnection connection)
+    {
+        // Park on this until the connection drops; created and awaited here so ownership is
+        // unambiguous (VSTHRD003).
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.Closed += _ =>
+        {
+            closed.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        await connection.StartAsync(_stopping.Token).ConfigureAwait(false);
+        _connection = connection;
+        Publish(ConnectionState.Connected, "Connected to ColtonStack");
+        HubConnected();
+
+        // Every successful connect after the first is a recovery from a hard outage: tell
+        // the app so consumers can catch up incrementally (the chat pane re-fetches from
+        // its newest known message id, not from zero).
+        if (_hasConnectedOnce)
+        {
+            messenger.Send(new HubReconnectedMessage());
+        }
+
+        _hasConnectedOnce = true;
+
+        if (_joinedChannelId is { } channel)
+        {
+            await JoinChannelAsync(channel).ConfigureAwait(false);
+        }
+
+        // Park until the connection drops, then loop around and rebuild.
+        await closed.Task.ConfigureAwait(false);
+        _connection = null;
+        if (!_stopping.IsCancellationRequested)
+        {
+            Publish(ConnectionState.Reconnecting, "Connection lost — reconnecting…");
         }
     }
 
@@ -150,6 +181,7 @@ public sealed partial class ChatHubClient(
         connection.Reconnected += reconnectMessage =>
         {
             Publish(ConnectionState.Connected, "Connected to ColtonStack");
+            messenger.Send(new HubReconnectedMessage());
             if (_joinedChannelId is { } channel)
             {
                 _ = JoinChannelAsync(channel);
@@ -167,6 +199,9 @@ public sealed partial class ChatHubClient(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "SignalR hub connected")]
     private partial void HubConnected();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Failed to join channel group {ChannelId} — re-join happens on reconnect")]
+    private partial void JoinChannelFailed(Exception exception, long channelId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "SignalR start failed: {Reason} — will keep retrying")]
     private partial void HubStartFailed(string reason);

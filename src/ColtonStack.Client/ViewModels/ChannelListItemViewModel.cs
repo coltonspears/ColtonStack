@@ -17,8 +17,12 @@ public sealed partial class ChannelListItemViewModel(ChannelSummaryDto summary) 
 
     public string DisplayName => $"# {Name}";
 
-    /// <summary>The summary this row was created from (id/name/topic are immutable per channel).</summary>
-    public ChannelSummaryDto Summary { get; } = summary;
+    /// <summary>
+    /// The summary this row was created from (id/name/topic are immutable per channel).
+    /// Updated by <see cref="UpdateFrom"/> so consumers reading <c>SelectedChannel.Summary</c>
+    /// always see fresh data.
+    /// </summary>
+    public ChannelSummaryDto Summary { get; private set; } = summary;
 
     [ObservableProperty]
     public partial string Preview { get; set; } = summary.LastMessagePreview ?? "No messages yet";
@@ -45,6 +49,7 @@ public sealed partial class ChannelListItemViewModel(ChannelSummaryDto summary) 
     /// <summary>Replaces the sidebar summary after a refresh or new activity.</summary>
     public void UpdateFrom(ChannelSummaryDto summary)
     {
+        Summary = summary;
         Preview = summary.LastMessagePreview ?? "No messages yet";
     }
 }

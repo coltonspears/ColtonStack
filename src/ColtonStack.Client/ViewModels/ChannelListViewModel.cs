@@ -120,11 +120,15 @@ public sealed partial class ChannelListViewModel(
             return;
         }
 
-        item.UpdateFrom(new ChannelSummaryDto(
-            item.Id, item.Name, item.Topic,
-            MessageCount: 0, LastMessageId: message.Message.Id,
-            LastMessageAtUtc: message.Message.CreatedAtUtc,
-            LastMessagePreview: message.Message.Text));
+        // Merge the live arrival into the stored summary so the sidebar stays fresh.
+        var current = item.Summary;
+        item.UpdateFrom(current with
+        {
+            LastMessageId = message.Message.Id,
+            LastMessageAtUtc = message.Message.CreatedAtUtc,
+            LastMessagePreview = message.Message.Text,
+            MessageCount = current.MessageCount + 1,
+        });
 
         if (SelectedChannel?.Id != message.Message.ChannelId)
         {

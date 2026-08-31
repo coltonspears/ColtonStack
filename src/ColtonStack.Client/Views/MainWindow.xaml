@@ -5,6 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:behaviors="clr-namespace:ColtonStack.Client.Behaviors"
         xmlns:views="clr-namespace:ColtonStack.Client.Views"
+        xmlns:vm="clr-namespace:ColtonStack.Client.ViewModels"
         mc:Ignorable="d"
         Title="ColtonStack"
         Width="1340" Height="840"
@@ -62,6 +63,78 @@
                     <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11" FontWeight="Bold" />
                 </Border>
             </Grid>
+        </DataTemplate>
+
+        <!--
+            Pane templates: each sidebar pane's view model renders through an implicit
+            DataTemplate keyed on its type. Core panes live here; extensions supply their own
+            template dictionaries merged at startup (see AuditPaneTemplates.xaml). The shell
+            only hosts a ContentControl — it has no idea how many panes exist.
+        -->
+
+        <!-- Channels pane: channel list with inline create flow -->
+        <DataTemplate DataType="{x:Type vm:ChannelListViewModel}">
+            <DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
+                    <TextBlock Text="Channels" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
+                    <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
+                            Content="&#xE710;" Command="{Binding ToggleAddChannelCommand}" ToolTip="Create a channel" />
+                </Grid>
+
+                <Border DockPanel.Dock="Top" Margin="14,2,14,6"
+                        Visibility="{Binding IsAddingChannel, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Style.IconButton}" Foreground="{StaticResource Brush.Green}"
+                                Content="&#xE724;" Command="{Binding CreateChannelCommand}" FontSize="13"
+                                ToolTip="Create channel" />
+                        <TextBox Style="{StaticResource Style.Input}" FontSize="12"
+                                 Text="{Binding NewChannelName, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
+                        </TextBox>
+                    </DockPanel>
+                </Border>
+
+                <ListBox ItemsSource="{Binding Channels}"
+                         SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                         ItemTemplate="{StaticResource Template.ChannelItem}"
+                         Style="{StaticResource Style.ChannelList}"
+                         HorizontalContentAlignment="Stretch" />
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- People pane: the workspace directory -->
+        <DataTemplate DataType="{x:Type vm:PeopleViewModel}">
+            <DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
+                    <TextBlock Text="People" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
+                    <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
+                            Content="&#xE72C;" Command="{Binding LoadCommand}" ToolTip="Refresh" />
+                </Grid>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding People}" Margin="8,4">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="8,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="32" Height="32" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="12"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Brush.Text}" />
+                                        <TextBlock Text="you" Margin="6,2,0,0" Style="{StaticResource Style.Muted}"
+                                                   Visibility="{Binding IsSelf, Converter={StaticResource Converter.BoolToVisibility}}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
         </DataTemplate>
 
         <!-- Message row: rounded avatar, grouped author header, body, hover action bar -->
@@ -146,101 +219,30 @@
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <Rectangle DockPanel.Dock="Top" Height="1" Fill="{StaticResource Brush.Border}" Margin="16,2,16,10" />
-                    <StackPanel HorizontalAlignment="Center">
-                        <RadioButton Style="{StaticResource Style.RailToggle}" Content="&#xE80F;" ToolTip="Home — channels"
-                                     IsChecked="{Binding ActivePane, Converter={StaticResource Converter.EnumEquals}, ConverterParameter=Channels}" />
-                        <RadioButton Style="{StaticResource Style.RailToggle}" Content="&#xE716;" ToolTip="People — everyone in the workspace"
-                                     IsChecked="{Binding ActivePane, Converter={StaticResource Converter.EnumEquals}, ConverterParameter=People}" />
-                    </StackPanel>
+                    <!-- Panes come from the extension registry: the rail renders whatever was
+                         registered (core panes, audit, future extensions) and two-way selection
+                         binding drives ActivePane — no enum, no per-pane wiring. -->
+                    <ListBox ItemsSource="{Binding Panes}"
+                             SelectedItem="{Binding ActivePane, Mode=TwoWay}"
+                             Style="{StaticResource Style.RailList}"
+                             ItemContainerStyle="{StaticResource Style.RailItem}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding IconGlyph}" ToolTip="{Binding Title}" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </DockPanel>
             </Border>
 
             <!-- ============================ Sidebar ============================ -->
             <Border Grid.Column="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,1,0">
-                <Grid>
-                    <!-- Channels pane -->
-                    <DockPanel>
-                        <DockPanel.Style>
-                            <Style TargetType="DockPanel">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ActivePane}" Value="Channels">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DockPanel.Style>
-
-                        <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
-                            <TextBlock Text="Channels" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
-                            <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
-                                    Content="&#xE710;" Command="{Binding Channels.ToggleAddChannelCommand}" ToolTip="Create a channel" />
-                        </Grid>
-
-                        <Border DockPanel.Dock="Top" Margin="14,2,14,6"
-                                Visibility="{Binding Channels.IsAddingChannel, Converter={StaticResource Converter.BoolToVisibility}}">
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Style.IconButton}" Foreground="{StaticResource Brush.Green}"
-                                        Content="&#xE724;" Command="{Binding Channels.CreateChannelCommand}" FontSize="13"
-                                        ToolTip="Create channel" />
-                                <TextBox Style="{StaticResource Style.Input}" FontSize="12"
-                                         Text="{Binding Channels.NewChannelName, UpdateSourceTrigger=PropertyChanged}">
-                                    <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
-                                </TextBox>
-                            </DockPanel>
-                        </Border>
-
-                        <ListBox ItemsSource="{Binding Channels.Channels}"
-                                 SelectedItem="{Binding Channels.SelectedChannel, Mode=TwoWay}"
-                                 ItemTemplate="{StaticResource Template.ChannelItem}"
-                                 Style="{StaticResource Style.ChannelList}"
-                                 HorizontalContentAlignment="Stretch" />
-                    </DockPanel>
-
-                    <!-- People pane (workspace directory) -->
-                    <DockPanel>
-                        <DockPanel.Style>
-                            <Style TargetType="DockPanel">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ActivePane}" Value="People">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DockPanel.Style>
-
-                        <Grid DockPanel.Dock="Top" Margin="16,16,12,4">
-                            <TextBlock Text="People" Style="{StaticResource Style.SectionHeader}" VerticalAlignment="Center" />
-                            <Button HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Style.IconButton}"
-                                    Content="&#xE72C;" Command="{Binding People.LoadCommand}" ToolTip="Refresh" />
-                        </Grid>
-
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding People.People}" Margin="8,4">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="8,5">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="32" Height="32" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="12"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Brush.Text}" />
-                                                <TextBlock Text="you" Margin="6,2,0,0" Style="{StaticResource Style.Muted}"
-                                                           Visibility="{Binding IsSelf, Converter={StaticResource Converter.BoolToVisibility}}" />
-                                            </StackPanel>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </Grid>
+                <!-- The active pane's view model renders here through its implicit DataTemplate.
+                     The shell knows nothing about pane contents; extensions bring their own. -->
+                <ContentControl Content="{Binding ActiveContent}"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch"
+                                Focusable="False" />
             </Border>
 
             <!-- ============================ Conversation ============================ -->
@@ -253,18 +255,21 @@
 
                 <Border Grid.Row="0" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="18,12">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Right" Text="{Binding Chat.TypingIndicator}" VerticalAlignment="Center"
-                                   Foreground="{StaticResource Brush.Green}" FontStyle="Italic" FontSize="12">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Chat.TypingIndicator}" Value="">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Chat.TypingIndicator}" Foreground="{StaticResource Brush.Green}" FontStyle="Italic" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Chat.TypingIndicator}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE721;" Command="{Binding Chat.ToggleSearchCommand}"
+                                    ToolTip="Search messages (Ctrl+F)" Margin="0,0,6,0" />
+                        </StackPanel>
                         <StackPanel>
                             <TextBlock Text="{Binding Chat.ChannelTitle}" Foreground="{StaticResource Brush.TextStrong}" FontSize="16" FontWeight="Bold" />
                             <TextBlock Text="{Binding Chat.CurrentChannel.Topic}" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
@@ -272,8 +277,30 @@
                     </DockPanel>
                 </Border>
 
-                <ListBox Grid.Row="1"
-                         ItemsSource="{Binding Chat.Messages}"
+                <!-- Search bar (appears when search is toggled) -->
+                <Border Grid.Row="1" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="10,8"
+                        Visibility="{Binding Chat.IsSearchActive, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SearchBox" Style="{StaticResource Style.Input}" FontSize="12"
+                                 Text="{Binding Chat.SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 behaviors:ComposerActions.Target="{Binding ElementName=SearchBox}">
+                            <TextBox.ToolTip>Search messages — pauses as you type, applies instantly</TextBox.ToolTip>
+                        </TextBox>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="6,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Chat.SearchResultCount, StringFormat={}{0} result(s)}" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"
+                                       Foreground="{StaticResource Brush.TextMuted}" Visibility="{Binding Chat.IsSearchActive, Converter={StaticResource Converter.BoolToVisibility}}" />
+                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE711;" Command="{Binding Chat.ClearSearchCommand}"
+                                    ToolTip="Clear search" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <ListBox Grid.Row="2"
+                         ItemsSource="{Binding Chat.FilteredMessages}"
                          ItemTemplate="{StaticResource Template.Message}"
                          Style="{StaticResource Style.ChatList}"
                          behaviors:AutoScrollBehavior.ScrollToNewItem="True"
@@ -370,7 +397,10 @@
         <Border Grid.Row="1" Grid.ColumnSpan="3" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,7">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <ToggleButton Style="{StaticResource Style.PillToggle}" Content="sim"
+                    <ToggleButton Style="{StaticResource Style.PillToggle}" Content="logs"
+                                  IsChecked="{Binding Diagnostics.IsOpen, Mode=TwoWay}"
+                                  ToolTip="Live application log (ILogger): retries, reconnects, failures" />
+                    <ToggleButton Margin="8,0,0,0" Style="{StaticResource Style.PillToggle}" Content="sim"
                                   IsChecked="{Binding Status.SimEnabled, Mode=TwoWay}"
                                   ToolTip="Server-side chat simulator: fake teammates type and post every few seconds" />
                     <ToggleButton Margin="8,0,0,0" Style="{StaticResource Style.PillToggle}" Content="chaos"
@@ -402,6 +432,76 @@
                 </Border>
             </DockPanel>
         </Border>
+
+        <!-- ============================ Diagnostics slide-over ============================ -->
+        <!-- Live ILogger output: the DiagnosticsLoggerProvider publishes entries onto the
+             messenger and this panel subscribes like any other view model. The toggle lives
+             on the status bar ("logs"). Bounded buffer (400 entries) — a tail, not a database. -->
+        <Grid Grid.RowSpan="2" Visibility="{Binding Diagnostics.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
+            <Border Width="440" HorizontalAlignment="Right"
+                    Background="{StaticResource Brush.Background}" BorderBrush="{StaticResource Brush.Border}"
+                    BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="14,12,10,10">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Diagnostics" Style="{StaticResource Style.WorkspaceTitle}" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Diagnostics.Entries.Count, StringFormat={}{0} entries}" Margin="10,0,0,0"
+                                       Style="{StaticResource Style.Muted}" FontSize="11" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE74D;"
+                                    Command="{Binding Diagnostics.ClearCommand}" ToolTip="Clear log" />
+                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE711;"
+                                    Command="{Binding Diagnostics.CloseCommand}" ToolTip="Close panel" />
+                        </StackPanel>
+                    </Grid>
+
+                    <ListBox ItemsSource="{Binding Diagnostics.Entries}"
+                             Style="{StaticResource Style.ChatList}"
+                             HorizontalContentAlignment="Stretch"
+                             BorderThickness="0" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="10,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" Margin="0,3,8,0" VerticalAlignment="Top">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource Brush.Green}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Warning">
+                                                        <Setter Property="Fill" Value="{StaticResource Brush.Amber}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Error">
+                                                        <Setter Property="Fill" Value="{StaticResource Brush.Red}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Level}" Value="Critical">
+                                                        <Setter Property="Fill" Value="{StaticResource Brush.Red}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <StackPanel Grid.Column="1">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding TimeText}" FontSize="10"
+                                                       Foreground="{StaticResource Brush.TextMuted}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Category}" FontSize="10" Margin="8,0,0,0" FontStyle="Italic"
+                                                       Foreground="{StaticResource Brush.TextMuted}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Message}" FontSize="11.5" TextWrapping="Wrap"
+                                                   Foreground="{StaticResource Brush.Text}" Margin="0,1,0,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
 
         <!-- ============================ Preferences overlay ============================ -->
         <!-- Loaded from and saved to the server (Dapper.Contrib UPDATE); Escape or Cancel closes. -->

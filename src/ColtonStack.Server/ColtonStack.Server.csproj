@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Dapper" />
     <PackageReference Include="Dapper.Contrib" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Resilience" />
 

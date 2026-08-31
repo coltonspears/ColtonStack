@@ -112,6 +112,15 @@ public sealed partial class ColtonStackApiClient(
         return state?.Enabled ?? false;
     }
 
+    /// <summary>Reads the server's audit trail — newest first. Populates the audit pane extension.</summary>
+    public async Task<IReadOnlyList<AuditEntryDto>> GetAuditAsync(int limit, CancellationToken cancellationToken)
+    {
+        var entries = await httpClient
+            .GetFromJsonAsync($"api/audit?limit={limit}", ColtonStackJsonContext.Default.IReadOnlyListAuditEntryDto, cancellationToken)
+            .ConfigureAwait(false);
+        return entries ?? [];
+    }
+
     public async Task SetSimulationAsync(bool enabled, CancellationToken cancellationToken)
     {
         using var response = await httpClient

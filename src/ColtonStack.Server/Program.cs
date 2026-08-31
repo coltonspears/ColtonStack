@@ -1,12 +1,14 @@
 using System.Net;
 using ColtonStack.Contracts;
 using ColtonStack.Server.Endpoints;
+using ColtonStack.Server.Extensions;
 using ColtonStack.Server.Hubs;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Middleware;
 using ColtonStack.Server.Services;
 using ColtonStack.Server.Simulation;
 using ColtonStack.Server.Webhooks;
+using FluentValidation;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Registry;
@@ -15,10 +17,26 @@ using Polly.Timeout;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// The server extension list — the single compile-checked place that decides which feature
+// extensions are installed. Each one registers services and maps its own endpoints; adding
+// a feature never means editing a shared enum or a core file. In the full product each
+// extension is a separate assembly that can ship on its own cadence.
+IServerStartup[] extensions = [new AuditExtension()];
+
+// Phase 1: extension service registration, before the container is built.
+foreach (var extension in extensions)
+{
+    extension.ConfigureServices(builder.Services, builder.Configuration);
+}
+
 // JSON over HTTP uses the shared source-generated context — the same one the client uses.
 // No reflection-based serializer anywhere in the system.
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ColtonStackJsonContext.Default));
+
+// FluentValidation validators — registered from the shared Contracts assembly so both
+// the server endpoints and the client ViewModel use the same rules.
+builder.Services.AddValidatorsFromAssemblyContaining<UpdateProfileRequestValidator>();
 
 // Composition root: dumb records flow through smart services, wired here.
 builder.Services.AddSingleton<IDbConnectionFactory>(_ =>
@@ -77,6 +95,12 @@ ChatEndpoints.Map(app);
 UserEndpoints.Map(app);
 WebhookEndpoints.Map(app);
 AdminEndpoints.Map(app);
+
+// Phase 2: extension endpoints, after the WebApplication exists.
+foreach (var extension in extensions)
+{
+    extension.ConfigureApp(app);
+}
 
 app.MapHub<ChatHub>("/hubs/chat");
 

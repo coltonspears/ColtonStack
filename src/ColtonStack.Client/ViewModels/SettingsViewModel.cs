@@ -1,8 +1,11 @@
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
+using ColtonStack.Contracts;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
+using FluentValidation;
+using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
 
 namespace ColtonStack.Client.ViewModels;
@@ -12,10 +15,13 @@ namespace ColtonStack.Client.ViewModels;
 /// (a real round-trip through the resilience pipeline, persisted with a Dapper.Contrib UPDATE).
 /// On save it publishes <see cref="ProfileUpdatedMessage"/> — whoever cares (the people pane)
 /// listens; this class doesn't know or mind.
+/// Validation uses <see cref="UpdateProfileRequestValidator"/> — the same rules the server enforces,
+/// shared through the Contracts project, so neither side can drift.
 /// </summary>
 public sealed partial class SettingsViewModel(
     ColtonStackApiClient api,
     IMessenger messenger,
+    IValidator<UpdateProfileRequest> validator,
     ILogger<SettingsViewModel> logger) : ObservableObject
 {
     /// <summary>Slack-ish swatches; the selected one is stored on the server per profile.</summary>
@@ -71,13 +77,34 @@ public sealed partial class SettingsViewModel(
     [RelayCommand]
     private void Close() => IsOpen = false;
 
-    private bool CanSave() => DisplayName.Trim().Length > 0;
+    private bool CanSave()
+    {
+        if (DisplayName.Trim().Length == 0)
+        {
+            return false;
+        }
+
+        // Reuse the shared server-side validator rules for the CanExecute check.
+        var request = new UpdateProfileRequest(DisplayName.Trim(), AvatarColor);
+        return validator.Validate(request).IsValid;
+    }
 
     [RelayCommand(AllowConcurrentExecutions = false, CanExecute = nameof(CanSave))]
     private async Task SaveAsync(CancellationToken cancellationToken)
     {
         IsBusy = true;
         ErrorText = string.Empty;
+
+        // Validate client-side using the same rules the server enforces.
+        var request = new UpdateProfileRequest(DisplayName.Trim(), AvatarColor);
+        var validation = await validator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+        {
+            ErrorText = string.Join("; ", validation.Errors.Select(e => e.ErrorMessage));
+            IsBusy = false;
+            return;
+        }
+
         try
         {
             var updated = await api.UpdateProfileAsync(DisplayName.Trim(), AvatarColor, cancellationToken);

@@ -3,6 +3,7 @@ using ColtonStack.Server.Data;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Services;
 using Dapper.Contrib.Extensions;
+using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -12,6 +13,7 @@ namespace ColtonStack.Server.Endpoints;
 /// <summary>
 /// Workspace members and the current user's profile. Pure CRUD, so it's all Dapper.Contrib —
 /// including the profile save, which is a real UPDATE derived from <see cref="UserRow"/>.
+/// Validation uses FluentValidation rules shared with the client (see <see cref="UpdateProfileRequestValidator"/>).
 /// </summary>
 public static class UserEndpoints
 {
@@ -32,20 +34,18 @@ public static class UserEndpoints
 
         api.MapPut("/me", async Task<IResult> (
             UpdateProfileRequest request,
+            IValidator<UpdateProfileRequest> validator,
             IDbConnectionFactory connections,
             IAuditService audit,
             CancellationToken cancellationToken) =>
         {
-            var displayName = request.DisplayName.Trim();
-            if (displayName.Length is 0 or > 40)
+            var validation = await validator.ValidateAsync(request, cancellationToken);
+            if (!validation.IsValid)
             {
-                return TypedResults.BadRequest(new { error = "Display name must be 1–40 characters." });
+                return TypedResults.BadRequest(new { error = string.Join("; ", validation.Errors.Select(e => e.ErrorMessage)) });
             }
 
-            if (!IsHexColor(request.AvatarColor))
-            {
-                return TypedResults.BadRequest(new { error = "Avatar color must look like #RRGGBB." });
-            }
+            var displayName = request.DisplayName.Trim();
 
             await using var connection = await connections.CreateOpenConnectionAsync(cancellationToken);
             var self = (await connection.GetAllAsync<UserRow>()).First(user => user.IsSelf);
@@ -65,7 +65,4 @@ public static class UserEndpoints
             return TypedResults.Ok(updated);
         });
     }
-
-    private static bool IsHexColor(string value) =>
-        value is { Length: 7 } && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit);
 }
