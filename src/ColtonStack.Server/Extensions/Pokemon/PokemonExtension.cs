@@ -30,7 +30,7 @@ public sealed class PokemonExtension : IServerStartup
             .AddHttpClient<PokeApiClient>((provider, client) =>
             {
                 client.BaseAddress = new Uri(provider.GetRequiredService<IOptions<PokemonOptions>>().Value.BaseUrl);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ColtonStack/1.0 (+https://github.com/coltonstack)");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("ColtonStack/1.0 (+https://github.com/coltonspears/coltonstack)");
             })
             .AddStandardResilienceHandler();
 
