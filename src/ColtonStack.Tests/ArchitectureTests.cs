@@ -22,12 +22,15 @@ public sealed class ArchitectureTests
     public void ViewModels_AreSealedAndNeverAbstract()
     {
         // Abstract view model base classes are how god classes are born. Every VM here is
-        // a leaf: concrete, sealed, constructed by DI. This rule keeps it that way.
+        // a leaf: concrete, sealed, constructed by DI. This rule keeps it that way. (Static
+        // helpers such as NameInitials are abstract+sealed in IL, so they are excluded.)
         var result = Types.InAssembly(typeof(MainViewModel).Assembly)
             .That()
             .ResideInNamespace($"{ClientNamespace}.ViewModels")
             .And()
             .AreClasses()
+            .And()
+            .AreNotStatic()
             .Should()
             .NotBeAbstract()
             .And()
@@ -137,8 +140,83 @@ public sealed class ArchitectureTests
         Assert.True(result.IsSuccessful, DescribeFailures(result));
     }
 
+    [Fact]
+    public void ViewModels_NeverDependOnWpf()
+    {
+        // View models are plain .NET: no Dispatcher, no DependencyObject, no ICollectionView.
+        // That is what lets every test in this project run on a thread-pool thread with no
+        // STA setup — and what stops "just one Dispatcher.Invoke" from creeping back in.
+        var result = Types.InAssembly(typeof(MainViewModel).Assembly)
+            .That()
+            .ResideInNamespace($"{ClientNamespace}.ViewModels")
+            .ShouldNot()
+            .HaveDependencyOnAny("System.Windows", "System.Windows.Data", "System.Windows.Threading")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, DescribeFailures(result));
+    }
+
+    [Fact]
+    public void ClientCore_NeverDependsOnAnInstalledExtension()
+    {
+        // Extensions plug into registries; the shell never names one. If a core view model or
+        // service referenced ColtonStack.Client.Extensions.Pokemon, removing the extension from
+        // App's list would break the build — the exact coupling the extension model exists to avoid.
+        // (App.xaml.cs, the composition root, is the one deliberate exception and lives in the
+        // root namespace, outside the ones checked here.)
+        var result = Types.InAssembly(typeof(MainViewModel).Assembly)
+            .That()
+            .ResideInNamespace($"{ClientNamespace}.ViewModels")
+            .Or()
+            .ResideInNamespace($"{ClientNamespace}.Services")
+            .Or()
+            .ResideInNamespace($"{ClientNamespace}.Behaviors")
+            .ShouldNot()
+            .HaveDependencyOnAny($"{ClientNamespace}.Extensions.Audit", $"{ClientNamespace}.Extensions.Pokemon")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, DescribeFailures(result));
+    }
+
+    [Fact]
+    public void ServerCore_NeverDependsOnAnInstalledExtension()
+    {
+        // Same rule on the server: services, endpoints and infrastructure know the extension
+        // *contracts* (IServerStartup, ISchemaContributor) but never a concrete extension.
+        var result = Types.InAssembly(typeof(ChannelService).Assembly)
+            .That()
+            .ResideInNamespace($"{ServerNamespace}.Services")
+            .Or()
+            .ResideInNamespace($"{ServerNamespace}.Endpoints")
+            .Or()
+            .ResideInNamespace($"{ServerNamespace}.Infrastructure")
+            .Or()
+            .ResideInNamespace($"{ServerNamespace}.Hubs")
+            .ShouldNot()
+            .HaveDependencyOnAny($"{ServerNamespace}.Extensions.Pokemon", $"{ServerNamespace}.Extensions.AuditExtension")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, DescribeFailures(result));
+    }
+
+    [Fact]
+    public void Extensions_TalkToTheCoreOnlyThroughContractsAndSeams()
+    {
+        // An extension may use the registries, the messenger, the settings store and the API
+        // interfaces — never a concrete core view model. Otherwise "the Pokémon extension" is
+        // just the god class with extra folders.
+        var result = Types.InAssembly(typeof(MainViewModel).Assembly)
+            .That()
+            .ResideInNamespace($"{ClientNamespace}.Extensions.Pokemon")
+            .ShouldNot()
+            .HaveDependencyOnAny($"{ClientNamespace}.ViewModels")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, DescribeFailures(result));
+    }
+
     /// <summary>NetArchTest failures list the offending type names; surface them in the assert message.</summary>
-    private static string DescribeFailures(Result result) =>
+    private static string DescribeFailures(TestResult result) =>
         result.IsSuccessful
             ? string.Empty
             : "Violations: " + string.Join(", ", result.FailingTypeNames ?? ["<unknown>"]);

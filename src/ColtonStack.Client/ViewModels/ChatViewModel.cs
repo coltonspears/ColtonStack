@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Windows.Data;
+using ColtonStack.Client.Extensions.Attachments;
+using ColtonStack.Client.Extensions.Commands;
 using ColtonStack.Client.Messages;
 using ColtonStack.Client.Services;
 using ColtonStack.Contracts;
@@ -12,53 +12,52 @@ using Microsoft.Extensions.Logging;
 namespace ColtonStack.Client.ViewModels;
 
 /// <summary>
-/// The active conversation: message history, the composer, live arrivals over SignalR, and the
-/// typing indicator. All state lives in generated partial properties; behavior in commands.
+/// The active conversation: message history, the composer, live arrivals over SignalR, the
+/// typing indicator, search and slash commands. State lives in generated partial properties;
+/// behavior in commands; the two non-trivial concerns (filtering, slash parsing) are composed
+/// in as <see cref="MessageSearch"/> and <see cref="SlashCommandInput"/> — small classes with
+/// their own tests, not regions of a god class.
 ///
 /// There is deliberately no threading code here: the messenger delivers every message on the
 /// UI thread (see UiThreadMessenger), and commands start on the UI thread and stay there.
 /// </summary>
-public sealed partial class ChatViewModel : ObservableObject, IRecipient<ChannelSelectedMessage>, IRecipient<MessagePostedMessage>, IRecipient<UserTypingMessage>, IRecipient<HubReconnectedMessage>, IDisposable
+public sealed partial class ChatViewModel(
+    IColtonStackApiClient api,
+    IChatConnection hub,
+    ICommandRegistry commands,
+    IAttachmentRegistry attachments,
+    IMessenger messenger,
+    ILogger<ChatViewModel> logger)
+    : ObservableObject, IRecipient<ChannelSelectedMessage>, IRecipient<MessagePostedMessage>, IRecipient<UserTypingMessage>, IRecipient<HubReconnectedMessage>, IDisposable
 {
-    private static readonly TimeSpan _groupingGap = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan _typingThrottle = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan _typingIndicatorDecay = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan _searchDebounce = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan GroupingGap = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan TypingThrottle = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan TypingIndicatorDecay = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan SearchDebounce = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan SlashDebounce = TimeSpan.FromMilliseconds(250);
 
-    private readonly ColtonStackApiClient _api;
-    private readonly ChatHubClient _hub;
-    private readonly IMessenger _messenger;
-    private readonly ILogger<ChatViewModel> _logger;
     private DateTimeOffset? _lastTypingSentAt;
     private CancellationTokenSource? _typingDecay;
     private CancellationTokenSource? _searchCts;
+    private CancellationTokenSource? _historyCts;
 
-    public ObservableCollection<MessageViewModel> Messages { get; } = new ObservableCollection<MessageViewModel>();
+    /// <summary>Filtering over the conversation; the list binds to <c>Search.Results</c>.</summary>
+    public MessageSearch Search { get; } = new();
 
-    /// <summary>
-    /// WPF's built-in live filtering view over <see cref="Messages"/>. Created once on the UI
-    /// thread; the filter predicate updates as the user types. The XAML ListBox binds here
-    /// instead of <c>Messages</c> so filtered results show automatically.
-    /// </summary>
-    public ICollectionView FilteredMessages { get; }
+    /// <summary>Slash-command state for the composer popup.</summary>
+    public SlashCommandInput Slash { get; } = new(commands, SlashDebounce);
 
-    public ChatViewModel(
-        ColtonStackApiClient api,
-        ChatHubClient hub,
-        IMessenger messenger,
-        ILogger<ChatViewModel> logger)
-    {
-        _api = api;
-        _hub = hub;
-        _messenger = messenger;
-        _logger = logger;
-        FilteredMessages = CollectionViewSource.GetDefaultView(Messages);
-    }
+    /// <summary>Every message in the current channel, oldest first.</summary>
+    public ObservableCollection<MessageViewModel> Messages => Search.Source;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ChannelTitle))]
+    [NotifyPropertyChangedFor(nameof(ComposerPlaceholder))]
+    [NotifyPropertyChangedFor(nameof(HasChannel))]
     public partial ChannelSummaryDto? CurrentChannel { get; set; }
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendMessageCommand))]
     public partial string Draft { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -74,51 +73,49 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
     [ObservableProperty]
     public partial bool IsSearchActive { get; set; }
 
-    [ObservableProperty]
-    public partial int SearchResultCount { get; set; }
+    public bool HasChannel => CurrentChannel is not null;
 
     public string ChannelTitle => CurrentChannel is { } channel ? $"# {channel.Name}" : "No channel selected";
 
-    public string ComposerPlaceholder => CurrentChannel is { } channel ? $"Message #{channel.Name}" : "Select a channel to start chatting";
-
-    partial void OnCurrentChannelChanged(ChannelSummaryDto? value)
-    {
-        OnPropertyChanged(nameof(ChannelTitle));
-        OnPropertyChanged(nameof(ComposerPlaceholder));
-    }
+    public string ComposerPlaceholder => CurrentChannel is { } channel ? $"Message #{channel.Name}  —  type / for commands" : "Select a channel to start chatting";
 
     partial void OnDraftChanged(string value)
     {
-        SendMessageCommand.NotifyCanExecuteChanged();
         NotifyTypingThrottled();
+        _ = RefreshSlashAsync(value);
     }
 
-    partial void OnSearchTextChanged(string value)
+    private async Task RefreshSlashAsync(string draft)
     {
-        DebounceSearch();
+        await Slash.UpdateAsync(draft);
+        NextSuggestionCommand.NotifyCanExecuteChanged();
+        PreviousSuggestionCommand.NotifyCanExecuteChanged();
+        AcceptSuggestionCommand.NotifyCanExecuteChanged();
     }
+
+    /// <summary>Mouse click on a suggestion row.</summary>
+    [RelayCommand]
+    private void PickSuggestion(SlashSuggestion? suggestion)
+    {
+        if (suggestion is not null)
+        {
+            Draft = suggestion.CompletedDraft;
+        }
+    }
+
+    partial void OnSearchTextChanged(string value) => DebounceSearch();
 
     partial void OnIsSearchActiveChanged(bool value)
     {
         if (!value)
         {
-            // Closing search: clear the filter and reset the box
             SearchText = string.Empty;
-            FilteredMessages.Filter = null;
-            SearchResultCount = 0;
+            Search.Filter = string.Empty;
         }
     }
 
     [RelayCommand]
-    private void ToggleSearch()
-    {
-        IsSearchActive = !IsSearchActive;
-        if (IsSearchActive)
-        {
-            // Focus is handled by the XAML behavior; just fire the filter.
-            SearchResultCount = Messages.Count;
-        }
-    }
+    private void ToggleSearch() => IsSearchActive = !IsSearchActive;
 
     private bool CanClearSearch() => IsSearchActive && SearchText.Length > 0;
 
@@ -126,45 +123,46 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
     private void ClearSearch()
     {
         SearchText = string.Empty;
-        FilteredMessages.Filter = null;
-        SearchResultCount = Messages.Count;
+        Search.Filter = string.Empty;
     }
 
+    /// <summary>Slash popup navigation — bound to Up/Down on the composer; inert when the popup is closed so the caret keeps working.</summary>
+    [RelayCommand(CanExecute = nameof(IsSlashOpen))]
+    private void NextSuggestion() => Slash.MoveSelection(+1);
+
+    [RelayCommand(CanExecute = nameof(IsSlashOpen))]
+    private void PreviousSuggestion() => Slash.MoveSelection(-1);
+
+    /// <summary>Tab in the composer: take the highlighted suggestion.</summary>
+    [RelayCommand(CanExecute = nameof(IsSlashOpen))]
+    private void AcceptSuggestion()
+    {
+        if (Slash.Selected is { } selected)
+        {
+            Draft = selected.CompletedDraft;
+        }
+    }
+
+    private bool IsSlashOpen() => Slash.IsActive && Slash.Suggestions.Count > 0;
+
     /// <summary>
-    /// Debounces the search filter: each keystroke cancels the previous pending refresh,
-    /// so the filter only applies after the user pauses typing for <see cref="SearchDebounce"/>.
+    /// Debounces the search filter: each keystroke cancels the previous pending refresh, so the
+    /// filter only applies after the user pauses typing.
     /// </summary>
     private void DebounceSearch()
     {
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = new CancellationTokenSource();
-        var token = _searchCts.Token;
-
-        _ = ApplyFilterAfterDelayAsync(token);
+        _ = ApplyFilterAfterDelayAsync(_searchCts.Token);
     }
 
     private async Task ApplyFilterAfterDelayAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await Task.Delay(_searchDebounce, cancellationToken).ConfigureAwait(true);
-
-            var filter = SearchText.Trim();
-            if (filter.Length == 0)
-            {
-                FilteredMessages.Filter = null;
-                SearchResultCount = Messages.Count;
-                return;
-            }
-
-            // Case-insensitive search across author name and message text
-            FilteredMessages.Filter = item =>
-                item is MessageViewModel msg
-                && (msg.AuthorName.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                    || msg.Text.Contains(filter, StringComparison.OrdinalIgnoreCase));
-
-            SearchResultCount = FilteredMessages.Cast<MessageViewModel>().Count(m => FilteredMessages.Filter(m));
+            await Task.Delay(SearchDebounce, cancellationToken);
+            Search.Filter = SearchText;
         }
         catch (OperationCanceledException)
         {
@@ -180,12 +178,30 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
             return;
         }
 
+        // Enter while the slash popup is open first completes the highlighted suggestion.
+        if (Slash.IsActive && Slash.Selected is { } selected && !string.Equals(Draft.Trim(), selected.CompletedDraft.Trim(), StringComparison.Ordinal))
+        {
+            Draft = selected.CompletedDraft;
+            if (!selected.IsArgument)
+            {
+                return; // the name is complete; now the argument gets typed
+            }
+
+            await Slash.UpdateAsync(Draft); // refresh state synchronously for TryResolve below
+        }
+
+        if (Draft.StartsWith('/'))
+        {
+            await RunSlashCommandAsync(channel, cancellationToken);
+            return;
+        }
+
         var text = Draft.Trim();
         Draft = string.Empty; // optimistic: clear the composer immediately
 
         try
         {
-            var saved = await _api.SendMessageAsync(channel.Id, text, cancellationToken);
+            var saved = await api.SendMessageAsync(channel.Id, text, cancellationToken);
 
             // Show our own copy immediately; when the hub echoes it back, AppendMessage dedupes by id.
             AppendMessage(saved);
@@ -194,7 +210,30 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
         {
             SendFailed(ex, channel.Id);
             Draft = text; // give the text back — the resilience pipeline exhausted its attempts
-            _messenger.Send(new HttpRetryMessage(0, $"Send failed: {ex.Message}"));
+            messenger.Send(new HttpRetryMessage(0, $"Send failed: {ex.Message}"));
+        }
+    }
+
+    private async Task RunSlashCommandAsync(ChannelSummaryDto channel, CancellationToken cancellationToken)
+    {
+        if (!Slash.TryResolve(out var command, out var argument))
+        {
+            messenger.Send(new HttpRetryMessage(0, $"Unknown command: {Draft.Split(' ')[0]}"));
+            return;
+        }
+
+        var draft = Draft;
+        Draft = string.Empty;
+        try
+        {
+            await command.ExecuteAsync(new CommandInvocation(argument, channel.Id, cancellationToken));
+            CommandRan(command.Id, channel.Id);
+        }
+        catch (Exception ex)
+        {
+            CommandFailed(ex, command.Id);
+            Draft = draft;
+            messenger.Send(new HttpRetryMessage(0, $"/{command.SlashName} failed: {ex.Message}"));
         }
     }
 
@@ -207,15 +246,17 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
         TypingIndicator = string.Empty;
         Messages.Clear();
 
-        // Clear any active search when switching channels
         if (IsSearchActive)
         {
             SearchText = string.Empty;
-            FilteredMessages.Filter = null;
-            SearchResultCount = 0;
+            Search.Filter = string.Empty;
         }
 
-        _ = LoadHistoryAsync(message.Channel);
+        // A channel switch cancels whatever history request the previous channel had in flight.
+        _historyCts?.Cancel();
+        _historyCts?.Dispose();
+        _historyCts = new CancellationTokenSource();
+        _ = LoadHistoryAsync(message.Channel, _historyCts.Token);
     }
 
     public void Receive(MessagePostedMessage message)
@@ -249,16 +290,16 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
     {
         if (CurrentChannel is { } channel)
         {
-            _ = CatchUpAsync(channel);
+            _ = CatchUpAsync(channel, _historyCts?.Token ?? CancellationToken.None);
         }
     }
 
-    private async Task CatchUpAsync(ChannelSummaryDto channel)
+    private async Task CatchUpAsync(ChannelSummaryDto channel, CancellationToken cancellationToken)
     {
         try
         {
             var lastId = Messages.Count > 0 ? Messages[^1].Id : 0;
-            var missed = await _api.GetMessagesAsync(channel.Id, afterId: lastId, CancellationToken.None);
+            var missed = await api.GetMessagesAsync(channel.Id, afterId: lastId, cancellationToken);
             if (CurrentChannel?.Id != channel.Id)
             {
                 return; // user switched away during the catch-up request
@@ -271,14 +312,18 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
 
             CaughtUp(missed.Count, channel.Id);
         }
+        catch (OperationCanceledException)
+        {
+            // channel switched — the new channel's load takes over
+        }
         catch (Exception ex)
         {
             CatchUpFailed(ex, channel.Id);
-            _messenger.Send(new HttpRetryMessage(0, $"Could not catch up on missed messages: {ex.Message}"));
+            messenger.Send(new HttpRetryMessage(0, $"Could not catch up on missed messages: {ex.Message}"));
         }
     }
 
-    private async Task LoadHistoryAsync(ChannelSummaryDto? channel)
+    private async Task LoadHistoryAsync(ChannelSummaryDto? channel, CancellationToken cancellationToken)
     {
         if (channel is null)
         {
@@ -288,7 +333,7 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
         IsLoadingHistory = true;
         try
         {
-            var history = await _api.GetMessagesAsync(channel.Id, afterId: 0, CancellationToken.None);
+            var history = await api.GetMessagesAsync(channel.Id, afterId: 0, cancellationToken);
             if (CurrentChannel?.Id != channel.Id)
             {
                 return; // the user switched away while the request was in flight
@@ -300,10 +345,14 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
                 AppendMessage(message);
             }
         }
+        catch (OperationCanceledException)
+        {
+            // superseded by a newer channel selection
+        }
         catch (Exception ex)
         {
             HistoryLoadFailed(ex, channel.Id);
-            _messenger.Send(new HttpRetryMessage(0, $"Could not load history: {ex.Message}"));
+            messenger.Send(new HttpRetryMessage(0, $"Could not load history: {ex.Message}"));
         }
         finally
         {
@@ -319,34 +368,32 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
         }
 
         var previous = Messages.Count > 0 ? Messages[^1] : null;
-        var isFirstOfGroup = previous is null
-            || !string.Equals(previous.AuthorName, message.AuthorName, StringComparison.Ordinal)
-            || message.CreatedAtUtc - previous.CreatedAtUtc > _groupingGap;
+        var isFirstOfDay = previous is null
+            || previous.CreatedAtUtc.ToLocalTime().Date != message.CreatedAtUtc.ToLocalTime().Date;
+        var isFirstOfGroup = isFirstOfDay
+            || !string.Equals(previous!.AuthorName, message.AuthorName, StringComparison.Ordinal)
+            || message.CreatedAtUtc - previous.CreatedAtUtc > GroupingGap
+            || message.Attachment is not null
+            || previous.HasAttachment;
 
-        Messages.Add(new MessageViewModel(message, isFirstOfGroup));
-
-        // Keep search result count in sync if a filter is active
-        if (IsSearchActive && FilteredMessages.Filter is { } filter)
-        {
-            SearchResultCount = FilteredMessages.Cast<MessageViewModel>().Count(m => filter(m));
-        }
+        Messages.Add(new MessageViewModel(message, isFirstOfGroup, isFirstOfDay, attachments.Materialize(message.Attachment)));
     }
 
     private void NotifyTypingThrottled()
     {
-        if (CurrentChannel is null || string.IsNullOrWhiteSpace(Draft))
+        if (CurrentChannel is null || string.IsNullOrWhiteSpace(Draft) || Draft.StartsWith('/'))
         {
             return;
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (_lastTypingSentAt is { } last && now - last < _typingThrottle)
+        if (_lastTypingSentAt is { } last && now - last < TypingThrottle)
         {
             return;
         }
 
         _lastTypingSentAt = now;
-        _ = _hub.NotifyTypingAsync(CurrentChannel.Id);
+        _ = hub.NotifyTypingAsync(CurrentChannel.Id, CancellationToken.None);
     }
 
     private void RestartTypingDecay()
@@ -362,7 +409,7 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
         try
         {
             // Started on the UI thread, so the continuation resumes there too.
-            await Task.Delay(_typingIndicatorDecay, cancellationToken);
+            await Task.Delay(TypingIndicatorDecay, cancellationToken);
             TypingIndicator = string.Empty;
         }
         catch (OperationCanceledException)
@@ -374,6 +421,10 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
     public void Dispose()
     {
         _typingDecay?.Dispose();
+        _searchCts?.Dispose();
+        _historyCts?.Dispose();
+        Slash.Dispose();
+        Search.Dispose();
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Sending a message to channel {ChannelId} failed after retries")]
@@ -387,4 +438,10 @@ public sealed partial class ChatViewModel : ObservableObject, IRecipient<Channel
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Reconnect catch-up for channel {ChannelId} failed after retries")]
     private partial void CatchUpFailed(Exception exception, long channelId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Slash command {CommandId} ran in channel {ChannelId}")]
+    private partial void CommandRan(string commandId, long channelId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Slash command {CommandId} failed")]
+    private partial void CommandFailed(Exception exception, string commandId);
 }

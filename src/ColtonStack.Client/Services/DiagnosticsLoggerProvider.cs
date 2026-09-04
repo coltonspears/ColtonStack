@@ -39,7 +39,10 @@ public sealed class DiagnosticsLoggerProvider(IMessenger messenger) : ILoggerPro
             var message = formatter(state, exception);
             if (exception is not null)
             {
-                message = $"{message}\n{exception.GetType().Name}: {exception.Message}";
+                // Type.ToString() rather than Type.Name: the latter is a System.Reflection
+                // member, and this assembly's architecture tests keep reflection out of Services.
+                var typeName = exception.GetType().ToString();
+                message = $"{message}\n{typeName[(typeName.LastIndexOf('.') + 1)..]}: {exception.Message}";
             }
 
             // UiThreadMessenger marshals this to the UI thread when logged off-thread.

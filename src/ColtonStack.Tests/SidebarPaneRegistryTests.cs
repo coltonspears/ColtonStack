@@ -80,7 +80,7 @@ public sealed class SidebarPaneRegistryTests
     }
 
     [Fact]
-    public void ActivateAsync_RunsTheExtensionHook_WithTheAttachedProvider()
+    public async Task ActivateAsync_RunsTheExtensionHook_WithTheAttachedProvider()
     {
         var registry = new SidebarPaneRegistry();
         var hookRuns = 0;
@@ -96,7 +96,7 @@ public sealed class SidebarPaneRegistryTests
         using var provider = new ServiceCollection().BuildServiceProvider();
         registry.Attach(provider);
 
-        pane.ActivateAsync().GetAwaiter().GetResult();
+        await pane.ActivateAsync();
 
         Assert.Equal(1, hookRuns);
     }

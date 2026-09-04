@@ -3,11 +3,13 @@ using System.Windows;
 namespace ColtonStack.Client.Views;
 
 /// <summary>
-/// No code-behind logic at all: Enter-to-send is a KeyBinding, auto-scroll is an attached
-/// behavior, and the composition root (App) assigns the DataContext and kicks off the initial
-/// load. Everything testable lives in the view models.
+/// Pure XAML shell. The composition root sets DataContext; every behavior lives in bindings,
+/// styles, attached behaviors and view models — nothing here but the required constructor.
 /// </summary>
-public partial class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
-    public MainWindow() => InitializeComponent();
+    public MainWindow()
+    {
+        InitializeComponent();
+    }
 }

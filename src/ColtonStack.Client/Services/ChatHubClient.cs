@@ -24,7 +24,7 @@ namespace ColtonStack.Client.Services;
 public sealed partial class ChatHubClient(
     IMessenger messenger,
     IOptions<ColtonStackOptions> options,
-    ILogger<ChatHubClient> logger) : IHostedService, IDisposable
+    ILogger<ChatHubClient> logger) : IHostedService, IChatConnection, IDisposable
 {
     private readonly CancellationTokenSource _stopping = new();
     private HubConnection? _connection;
@@ -49,8 +49,8 @@ public sealed partial class ChatHubClient(
 
     public void Dispose() => _stopping.Dispose();
 
-    /// <summary>Joins (or switches to) a channel's SignalR group; remembered and re-applied after reconnects.</summary>
-    public async Task JoinChannelAsync(long channelId)
+    /// <inheritdoc />
+    public async Task JoinChannelAsync(long channelId, CancellationToken cancellationToken)
     {
         _joinedChannelId = channelId;
         var connection = _connection;
@@ -58,10 +58,10 @@ public sealed partial class ChatHubClient(
         {
             try
             {
-                await connection.InvokeAsync(ChatHubMethods.JoinChannel, channelId).ConfigureAwait(false);
+                await connection.InvokeAsync(ChatHubMethods.JoinChannel, channelId, cancellationToken).ConfigureAwait(false);
                 JoinedChannel(channelId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The connection could drop between the state check and InvokeAsync;
                 // the reconnect loop handles re-joining automatically.
@@ -70,13 +70,15 @@ public sealed partial class ChatHubClient(
         }
     }
 
-    /// <summary>Fire-and-forget typing notification, throttled by the caller.</summary>
-    public async Task NotifyTypingAsync(long channelId)
+    /// <inheritdoc />
+    public async Task NotifyTypingAsync(long channelId, CancellationToken cancellationToken)
     {
         var connection = _connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync(ChatHubMethods.NotifyTyping, channelId).ConfigureAwait(false);
+            // The hub resolves who is typing from the workspace profile — the client never
+            // sends a display name it could get wrong.
+            await connection.InvokeAsync(ChatHubMethods.NotifyTyping, channelId, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -147,7 +149,7 @@ public sealed partial class ChatHubClient(
 
         if (_joinedChannelId is { } channel)
         {
-            await JoinChannelAsync(channel).ConfigureAwait(false);
+            await JoinChannelAsync(channel, _stopping.Token).ConfigureAwait(false);
         }
 
         // Park until the connection drops, then loop around and rebuild.
@@ -184,7 +186,7 @@ public sealed partial class ChatHubClient(
             messenger.Send(new HubReconnectedMessage());
             if (_joinedChannelId is { } channel)
             {
-                _ = JoinChannelAsync(channel);
+                _ = JoinChannelAsync(channel, _stopping.Token);
             }
 
             return Task.CompletedTask;

@@ -9,11 +9,12 @@ public interface IMessageService
     Task<IReadOnlyList<MessageDto>> GetRecentAsync(long channelId, long afterId, int limit, CancellationToken cancellationToken);
 
     /// <summary>
-    /// The full save pipeline for one message: persist with Dapper → audit → broadcast over
-    /// SignalR → enqueue webhook delivery. The dumb <see cref="MessageDto"/> flows through
-    /// smart services; it never saves itself.
+    /// The full save pipeline for one message posted by the current user: persist with Dapper →
+    /// audit → broadcast over SignalR → enqueue webhook delivery. The dumb <see cref="MessageDto"/>
+    /// flows through smart services; it never saves itself. Extensions post rich content by
+    /// passing an <paramref name="attachment"/> — the pipeline is closed to modification.
     /// </summary>
-    Task<MessageDto> SendAsync(long channelId, SendMessageRequest request, CancellationToken cancellationToken);
+    Task<MessageDto> SendAsync(long channelId, string text, MessageAttachmentDto? attachment, CancellationToken cancellationToken);
 
     /// <summary>Same pipeline, but posting as a specific (non-self) user — used by the chat-activity simulator.</summary>
     Task<MessageDto> SendAsUserAsync(long channelId, long userId, string text, CancellationToken cancellationToken);

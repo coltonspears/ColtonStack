@@ -11,6 +11,7 @@ namespace ColtonStack.Contracts;
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(MessageDto))]
+[JsonSerializable(typeof(MessageAttachmentDto))]
 [JsonSerializable(typeof(ChannelSummaryDto))]
 [JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(CreateChannelRequest))]
@@ -21,9 +22,15 @@ namespace ColtonStack.Contracts;
 [JsonSerializable(typeof(WebhookPayload))]
 [JsonSerializable(typeof(AuditEntryDto))]
 [JsonSerializable(typeof(SimulationStateDto))]
+[JsonSerializable(typeof(SettingDto))]
+[JsonSerializable(typeof(SetSettingRequest))]
+[JsonSerializable(typeof(PokemonSummaryDto))]
+[JsonSerializable(typeof(PokemonCardDto))]
 [JsonSerializable(typeof(IReadOnlyList<MessageDto>))]
 [JsonSerializable(typeof(IReadOnlyList<UserDto>))]
 [JsonSerializable(typeof(IReadOnlyList<ChannelSummaryDto>))]
 [JsonSerializable(typeof(IReadOnlyList<WebhookRegistrationDto>))]
 [JsonSerializable(typeof(IReadOnlyList<AuditEntryDto>))]
+[JsonSerializable(typeof(IReadOnlyList<SettingDto>))]
+[JsonSerializable(typeof(IReadOnlyList<PokemonSummaryDto>))]
 public sealed partial class ColtonStackJsonContext : JsonSerializerContext;

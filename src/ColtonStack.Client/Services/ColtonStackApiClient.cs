@@ -16,7 +16,7 @@ namespace ColtonStack.Client.Services;
 /// </summary>
 public sealed partial class ColtonStackApiClient(
     HttpClient httpClient,
-    ILogger<ColtonStackApiClient> logger)
+    ILogger<ColtonStackApiClient> logger) : IColtonStackApiClient
 {
     public async Task<IReadOnlyList<ChannelSummaryDto>> GetChannelsAsync(CancellationToken cancellationToken)
     {
@@ -128,6 +128,40 @@ public sealed partial class ColtonStackApiClient(
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
+
+    public async Task<IReadOnlyList<SettingDto>> GetSettingsAsync(CancellationToken cancellationToken)
+    {
+        var settings = await httpClient
+            .GetFromJsonAsync("api/settings", ColtonStackJsonContext.Default.IReadOnlyListSettingDto, cancellationToken)
+            .ConfigureAwait(false);
+        return settings ?? [];
+    }
+
+    public async Task<SettingDto> PutSettingAsync(string key, string value, CancellationToken cancellationToken)
+    {
+        if (!SettingKey.IsValid(key))
+        {
+            throw new ArgumentException($"'{key}' is not a valid settings key.", nameof(key));
+        }
+
+        using var response = await httpClient
+            .PutAsJsonAsync($"api/settings/{key}", new SetSettingRequest(value), ColtonStackJsonContext.Default.SetSettingRequest, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            SettingRejected((int)response.StatusCode, key);
+            throw new HttpRequestException($"Saving setting '{key}' failed ({(int)response.StatusCode} {response.StatusCode}).");
+        }
+
+        var saved = await response.Content
+            .ReadFromJsonAsync(ColtonStackJsonContext.Default.SettingDto, cancellationToken)
+            .ConfigureAwait(false);
+        return saved ?? throw new InvalidOperationException("The server returned an empty setting.");
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Server rejected setting {Key} with status {StatusCode}")]
+    private partial void SettingRejected(int statusCode, string key);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Server rejected a message send for channel {ChannelId} with status {StatusCode}")]
     private partial void SendMessageRejected(int statusCode, long channelId);

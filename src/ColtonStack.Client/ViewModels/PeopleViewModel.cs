@@ -14,7 +14,7 @@ namespace ColtonStack.Client.ViewModels;
 /// settings view model that caused them.
 /// </summary>
 public sealed partial class PeopleViewModel(
-    ColtonStackApiClient api,
+    IColtonStackApiClient api,
     IMessenger messenger,
     ILogger<PeopleViewModel> logger) : ObservableObject, IRecipient<ProfileUpdatedMessage>
 {

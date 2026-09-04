@@ -16,10 +16,9 @@ namespace ColtonStack.Tests;
 /// </summary>
 public sealed class ChannelListViewModelTests : IDisposable
 {
-    private readonly IMessenger _messenger = WeakReferenceMessenger.Default;
+    private readonly IMessenger _messenger = new WeakReferenceMessenger();
     private readonly ChannelListViewModel _vm;
-    private readonly ColtonStackApiClient _api = Substitute.For<ColtonStackApiClient>(
-        Substitute.For<HttpClient>(), NullLogger<ColtonStackApiClient>.Instance);
+    private readonly IColtonStackApiClient _api = Substitute.For<IColtonStackApiClient>();
 
     private static ChannelSummaryDto General => new(
         Id: 1, Name: "general", Topic: "Chat",
@@ -35,9 +34,8 @@ public sealed class ChannelListViewModelTests : IDisposable
 
     public ChannelListViewModelTests()
     {
-        _vm = new ChannelListViewModel(_api, Substitute.For<ChatHubClient>(
-            _messenger, Substitute.For<Microsoft.Extensions.Options.IOptions<Configuration.ColtonStackOptions>>(),
-            NullLogger<ChatHubClient>.Instance), _messenger, NullLogger<ChannelListViewModel>.Instance);
+        // The view model sees only the two seams — no HttpClient, no SignalR connection, no server.
+        _vm = new ChannelListViewModel(_api, Substitute.For<IChatConnection>(), _messenger, NullLogger<ChannelListViewModel>.Instance);
         _messenger.RegisterAll(_vm);
     }
 
@@ -97,7 +95,7 @@ public sealed class ChannelListViewModelTests : IDisposable
 
         var item = _vm.Channels[0];
         Assert.Equal("New message here", item.Preview);
-        Assert.Equal(0, item.UnreadCount); // selected by default? no, selected is null
+        Assert.Equal(1, item.UnreadCount); // nothing is selected, so activity in #general is unread
     }
 
     [Fact]

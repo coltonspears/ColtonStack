@@ -7,23 +7,23 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Logging;
 
-namespace ColtonStack.Client.ViewModels;
+namespace ColtonStack.Client.Extensions.Audit;
 
 /// <summary>
 /// The audit trail viewer, delivered by the audit pane extension — a plain view model with a
 /// load command and nothing else. It exists only because the extension registered it; the
-/// core app has no idea this pane exists.
+/// core app has no idea this pane exists. The page size comes from the settings store under
+/// the extension's own key.
 ///
 /// Contrast with the legacy world: auditing was a bool on a base class, invisible and
 /// untestable. Here it is a queryable feed of dumb records rendered by an extension.
 /// </summary>
 public sealed partial class AuditViewModel(
-    ColtonStackApiClient api,
+    IColtonStackApiClient api,
+    ISettingsStore settings,
     IMessenger messenger,
     ILogger<AuditViewModel> logger) : ObservableObject
 {
-    public const int PageSize = 200;
-
     public ObservableCollection<AuditEntryDto> Entries { get; } = [];
 
     [ObservableProperty]
@@ -40,7 +40,8 @@ public sealed partial class AuditViewModel(
         IsLoading = true;
         try
         {
-            var entries = await api.GetAuditAsync(PageSize, cancellationToken);
+            var pageSize = settings.GetInt(AuditSettingsViewModel.PageSizeKey, AuditSettingsViewModel.DefaultPageSize);
+            var entries = await api.GetAuditAsync(pageSize, cancellationToken);
 
             Entries.Clear();
             foreach (var entry in entries)

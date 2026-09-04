@@ -16,8 +16,8 @@ namespace ColtonStack.Client.ViewModels;
 /// ObservableCollection below is only ever touched from the right thread by construction.
 /// </summary>
 public sealed partial class ChannelListViewModel(
-    ColtonStackApiClient api,
-    ChatHubClient hub,
+    IColtonStackApiClient api,
+    IChatConnection hub,
     IMessenger messenger,
     ILogger<ChannelListViewModel> logger) : ObservableObject, IRecipient<ChannelCreatedMessage>, IRecipient<MessagePostedMessage>
 {
@@ -48,7 +48,7 @@ public sealed partial class ChannelListViewModel(
         if (value is not null)
         {
             value.UnreadCount = 0;
-            _ = hub.JoinChannelAsync(value.Id);
+            _ = hub.JoinChannelAsync(value.Id, CancellationToken.None);
         }
     }
 

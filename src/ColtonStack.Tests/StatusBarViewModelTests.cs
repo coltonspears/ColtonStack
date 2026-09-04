@@ -16,10 +16,9 @@ namespace ColtonStack.Tests;
 /// </summary>
 public sealed class StatusBarViewModelTests : IDisposable
 {
-    private readonly IMessenger _messenger = WeakReferenceMessenger.Default;
+    private readonly IMessenger _messenger = new WeakReferenceMessenger();
     private readonly StatusBarViewModel _vm;
-    private readonly ColtonStackApiClient _api = Substitute.For<ColtonStackApiClient>(
-        Substitute.For<HttpClient>(), NullLogger<ColtonStackApiClient>.Instance);
+    private readonly IColtonStackApiClient _api = Substitute.For<IColtonStackApiClient>();
 
     public StatusBarViewModelTests()
     {

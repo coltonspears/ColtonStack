@@ -81,7 +81,41 @@ public sealed class MessageViewModelTests
     {
         // Contrast with legacy: MessageViewModel has zero change notification baggage.
         // It's a plain object that projects once and is discarded.
+        Assert.False(typeof(System.ComponentModel.INotifyPropertyChanged).IsAssignableFrom(typeof(MessageViewModel)));
+    }
+
+    [Fact]
+    public void Attachment_DefaultsToNone()
+    {
         var vm = new MessageViewModel(SampleDto, isFirstOfGroup: true);
-        Assert.False(vm is System.ComponentModel.INotifyPropertyChanged);
+
+        Assert.Null(vm.Attachment);
+        Assert.False(vm.HasAttachment);
+        Assert.False(vm.IsFirstOfDay);
+    }
+
+    [Fact]
+    public void Attachment_IsCarriedThrough()
+    {
+        var card = new object();
+        var vm = new MessageViewModel(SampleDto, isFirstOfGroup: true, isFirstOfDay: true, attachment: card);
+
+        Assert.Same(card, vm.Attachment);
+        Assert.True(vm.HasAttachment);
+        Assert.True(vm.IsFirstOfDay);
+    }
+
+    [Fact]
+    public void DateHeaderFor_TodayYesterdayAndOlder()
+    {
+        var now = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero).ToLocalTime();
+
+        Assert.Equal("Today", MessageViewModel.DateHeaderFor(now, now));
+        Assert.Equal("Yesterday", MessageViewModel.DateHeaderFor(now.AddDays(-1), now));
+
+        var older = MessageViewModel.DateHeaderFor(now.AddDays(-10), now);
+        Assert.NotEqual("Today", older);
+        Assert.NotEqual("Yesterday", older);
+        Assert.NotEmpty(older);
     }
 }

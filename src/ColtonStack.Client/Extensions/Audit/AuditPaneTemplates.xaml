@@ -1,27 +1,26 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:vm="clr-namespace:ColtonStack.Client.ViewModels">
+                    xmlns:audit="clr-namespace:ColtonStack.Client.Extensions.Audit">
 
     <!--
-      Extension-supplied UI for the audit pane. Because this dictionary is merged at runtime
-      by the extension host, shared app styles are referenced with DynamicResource —
-      parse-time StaticResource can only see this dictionary's own chain.
+      Extension-supplied UI for the audit pane and its settings section. Because this dictionary
+      is merged at runtime by the extension host, shared app styles are referenced with
+      DynamicResource — parse-time StaticResource can only see this dictionary's own chain.
     -->
 
-    <DataTemplate DataType="{x:Type vm:AuditViewModel}">
+    <DataTemplate DataType="{x:Type audit:AuditViewModel}">
         <DockPanel Background="Transparent">
-            <Grid DockPanel.Dock="Top" Margin="14,10,10,10">
+            <Grid DockPanel.Dock="Top" Margin="16,16,12,8">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Audit trail" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{DynamicResource Brush.TextMuted}" VerticalAlignment="Center" />
+                    <TextBlock Text="Audit trail" Style="{DynamicResource Style.SectionHeader}" VerticalAlignment="Center" />
                     <TextBlock Text="{Binding Entries.Count, StringFormat={}{0} entries}" Margin="10,0,0,0"
-                               FontSize="11" Foreground="{DynamicResource Brush.TextMuted}" VerticalAlignment="Center" />
+                               Style="{DynamicResource Style.Muted}" VerticalAlignment="Center" />
                 </StackPanel>
                 <Button Style="{DynamicResource Style.IconButton}" Content="&#xE72C;" HorizontalAlignment="Right"
                         Command="{Binding LoadCommand}" ToolTip="Refresh audit trail" />
             </Grid>
 
-            <TextBlock DockPanel.Dock="Bottom" Margin="12,4,12,10" FontSize="11" TextWrapping="Wrap"
+            <TextBlock DockPanel.Dock="Bottom" Margin="16,4,16,12" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource Brush.TextMuted}"
                        Text="Every save, channel creation and profile change is audited by a plain service that receives dumb records — the same trail the legacy base class wrote invisibly." />
 
@@ -41,10 +40,10 @@
             </TextBlock>
 
             <ListBox ItemsSource="{Binding Entries}" HorizontalContentAlignment="Stretch"
-                     BorderThickness="0" Background="Transparent">
+                     Style="{DynamicResource Style.ChatList}" ItemContainerStyle="{DynamicResource Style.PlainItem}">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Grid Margin="12,4">
+                        <Grid Margin="16,5">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -72,5 +71,19 @@
                 </ListBox.ItemTemplate>
             </ListBox>
         </DockPanel>
+    </DataTemplate>
+
+    <!-- Settings section contributed by the extension -->
+    <DataTemplate DataType="{x:Type audit:AuditSettingsViewModel}">
+        <StackPanel MaxWidth="520" HorizontalAlignment="Left">
+            <TextBlock Text="Audit trail" Style="{DynamicResource Style.PageTitle}" />
+            <TextBlock Text="Contributed by the audit extension. The value is stored on the server under the key the extension owns (audit.pagesize); the core never learns what it means."
+                       Style="{DynamicResource Style.Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,20" />
+
+            <TextBlock Text="Entries per load" Style="{DynamicResource Style.SectionHeader}" Margin="0,0,0,8" />
+            <ListBox ItemsSource="{Binding PageSizes}" SelectedItem="{Binding PageSize, Mode=TwoWay}"
+                     Style="{DynamicResource Style.ChoiceList}" />
+            <TextBlock Text="{Binding StatusText}" Style="{DynamicResource Style.Muted}" Margin="0,10,0,0" />
+        </StackPanel>
     </DataTemplate>
 </ResourceDictionary>

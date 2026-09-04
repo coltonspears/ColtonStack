@@ -1,6 +1,5 @@
 using ColtonStack.Contracts;
 using ColtonStack.Server.Middleware;
-using ColtonStack.Server.Services;
 using ColtonStack.Server.Simulation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -15,9 +14,9 @@ public static class AdminEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapPost("/chaos/{enabled:bool}", (bool enabled) =>
+        api.MapPost("/chaos/{enabled:bool}", (bool enabled, ChaosState chaos) =>
         {
-            ChaosMiddleware.Enabled = enabled;
+            chaos.Enabled = enabled;
             return TypedResults.Ok(new { chaosEnabled = enabled });
         });
 

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace ColtonStack.Client.Extensions;
 
 /// <summary>
@@ -8,8 +6,8 @@ namespace ColtonStack.Client.Extensions;
 /// activation hook. Nothing in the core app has an enum of panes; adding a pane means
 /// calling <see cref="ISidebarPaneRegistry.Register"/>, not editing shared source.
 ///
-/// The content object is created lazily on first activation, so an extension's view models
-/// are only constructed when its pane is actually visited (and lazy-load hooks run there too).
+/// The content object is created lazily on first activation (see <see cref="LazyContent"/>), so
+/// an extension's view models are only constructed when its pane is actually visited.
 /// </summary>
 public sealed class SidebarPaneDefinition(
     string id,
@@ -19,8 +17,7 @@ public sealed class SidebarPaneDefinition(
     Func<IServiceProvider, object> contentFactory,
     Func<IServiceProvider, Task>? activatedAsync = null)
 {
-    private object? _content;
-    private IServiceProvider? _services;
+    private readonly LazyContent _content = new($"Pane '{id}'", contentFactory);
 
     /// <summary>Stable identifier — the anchor for selection state and templates. Duplicate registration throws.</summary>
     public string Id { get; } = id;
@@ -35,21 +32,11 @@ public sealed class SidebarPaneDefinition(
     public int Order { get; } = order;
 
     /// <summary>Called by the registry once the DI container exists; enables lazy content creation.</summary>
-    internal void Attach(IServiceProvider services) => _services = services;
+    internal void Attach(IServiceProvider services) => _content.Attach(services);
 
     /// <summary>The pane's root view model (its DataContext). Created on first access, then cached.</summary>
-    public object Content => _content ??= _services is { } services
-        ? contentFactory(services)
-        : throw new InvalidOperationException($"Pane '{Id}' was activated before the host finished starting.");
+    public object Content => _content.Value;
 
     /// <summary>Runs when the pane becomes active — the extension's lazy-load hook.</summary>
-    public Task ActivateAsync()
-    {
-        if (_services is not { } services || activatedAsync is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        return activatedAsync(services);
-    }
+    public Task ActivateAsync() => _content.RunAsync(activatedAsync);
 }

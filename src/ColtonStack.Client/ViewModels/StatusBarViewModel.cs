@@ -13,7 +13,7 @@ namespace ColtonStack.Client.ViewModels;
 /// on the UI thread (see UiThreadMessenger), so Receive() just sets properties.
 /// </summary>
 public sealed partial class StatusBarViewModel(
-    ColtonStackApiClient api,
+    IColtonStackApiClient api,
     ILogger<StatusBarViewModel> logger) : ObservableObject, IRecipient<ConnectionStatusMessage>, IRecipient<HttpRetryMessage>
 {
     [ObservableProperty]

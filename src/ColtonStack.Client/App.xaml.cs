@@ -1,7 +1,8 @@
 using System.Windows;
 using ColtonStack.Client.Configuration;
 using ColtonStack.Client.Extensions;
-using ColtonStack.Client.Messages;
+using ColtonStack.Client.Extensions.Audit;
+using ColtonStack.Client.Extensions.Pokemon;
 using ColtonStack.Client.Services;
 using ColtonStack.Client.ViewModels;
 using ColtonStack.Client.Views;
@@ -10,13 +11,6 @@ using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Http.Resilience;
-using Polly;
-using Polly.CircuitBreaker;
-using Polly.Registry;
-using Polly.Retry;
-using Polly.Timeout;
 
 namespace ColtonStack.Client;
 
@@ -25,31 +19,33 @@ namespace ColtonStack.Client;
 /// one composition root, one DI container, one configuration/logging stack — no service locator.
 ///
 /// The client extension list lives here: the single compile-checked place that decides which
-/// extensions are installed. Each one registers services, sidebar panes and its own XAML.
+/// extensions are installed. Each one registers services, sidebar panes, commands, settings
+/// sections, attachment renderers and its own XAML.
 /// </summary>
-public partial class App : Application
+public sealed partial class App : Application
 {
-    private static readonly IClientStartup[] ClientExtensions = [new CorePanesExtension(), new AuditPaneExtension()];
-
-    private static readonly List<string> ExtensionResources = [];
+    private static readonly IClientStartup[] ClientExtensions =
+    [
+        new CorePanesExtension(),
+        new AuditPaneExtension(),
+        new PokemonExtension(),
+    ];
 
     private IHost? _host;
+    private ClientStartupContext? _extensions;
 
 #pragma warning disable VSTHRD100 // WPF lifecycle overrides are void; awaiting here is the app's actual entry point.
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        _host = BuildHost();
+        (_host, _extensions) = BuildHost();
 
-        // Extension XAML (implicit DataTemplates for pane view models) merges before any
-        // window renders, so a pane's template is always resolvable.
-        foreach (var source in ExtensionResources)
+        // Extension XAML (implicit DataTemplates for pane, section and attachment view models)
+        // merges before any window renders, so every template is resolvable.
+        foreach (var source in _extensions.ResourceDictionaries)
         {
-            Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
-            {
-                Source = new Uri(source, UriKind.Absolute),
-            });
+            Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(source, UriKind.Absolute) });
         }
 
         // The composition root wires messenger subscriptions: each view model declares what it
@@ -62,16 +58,19 @@ public partial class App : Application
         messenger.RegisterAll(_host.Services.GetRequiredService<StatusBarViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<PeopleViewModel>());
         messenger.RegisterAll(_host.Services.GetRequiredService<DiagnosticsViewModel>());
+        messenger.RegisterAll(_host.Services.GetRequiredService<SettingsViewModel>());
+        messenger.RegisterAll(_host.Services.GetRequiredService<MainViewModel>());
 
         await _host.StartAsync();
 
-        // Panes build their content lazily through the DI provider — hand the registry its
-        // provider now that the container exists.
-        _host.Services.GetRequiredService<SidebarPaneRegistry>().Attach(_host.Services);
+        // Panes, commands and settings sections build their content lazily through the DI
+        // provider — hand the registries their provider now that the container exists.
+        _extensions.Attach(_host.Services);
 
-        // Reflect the server's simulator state on the status bar toggle (fire-and-forget: the
-        // client works fine even if the server is still down).
+        // Reflect the server's simulator state on the status bar toggle and pull persisted
+        // settings (fire-and-forget: the client works fine even if the server is still down).
         _ = _host.Services.GetRequiredService<StatusBarViewModel>().InitializeAsync();
+        _ = _host.Services.GetRequiredService<ISettingsStore>().LoadAsync(CancellationToken.None);
 
         // The window is pure XAML; the composition root hands it its DataContext.
         var window = _host.Services.GetRequiredService<MainWindow>();
@@ -96,7 +95,7 @@ public partial class App : Application
     }
 #pragma warning restore VSTHRD100
 
-    private static IHost BuildHost()
+    private static (IHost Host, ClientStartupContext Extensions) BuildHost()
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -122,104 +121,53 @@ public partial class App : Application
         // cleaned up without anyone unregistering by hand.
         builder.Services.AddSingleton<IMessenger>(messenger);
 
+        AddCoreServices(builder.Services);
+        AddViewModels(builder.Services);
+
+        // Phase 1 of the client extension contract: each extension adds services, panes,
+        // commands, settings sections, attachment renderers and XAML before the container is
+        // built. Runs last so extensions can decorate or depend on core registrations.
+        var extensions = new ClientStartupContext(builder.Services);
+        foreach (var extension in ClientExtensions)
+        {
+            extension.Configure(extensions);
+        }
+
+        extensions.RegisterRegistries();
+
+        return (builder.Build(), extensions);
+    }
+
+    private static void AddCoreServices(IServiceCollection services)
+    {
         // FluentValidation validators — shared with the server through the Contracts project.
         // The same UpdateProfileRequestValidator runs client-side (CanExecute / SaveAsync)
         // and server-side (the PUT /me endpoint).
-        builder.Services.AddValidatorsFromAssemblyContaining<Contracts.UpdateProfileRequestValidator>();
+        services.AddValidatorsFromAssemblyContaining<Contracts.UpdateProfileRequestValidator>();
 
-        // Sidebar panes: the registry the extensions fill. The shell never hardcodes a pane;
-        // it binds to whatever was registered, sorted by explicit order.
-        RegisterClientExtensions(builder.Services);
-
-        AddResilientApiClient(builder.Services);
+        // Typed HttpClient + shared resilience pipeline. View models depend on the interface.
+        services.AddColtonStackHttpClient<ColtonStackApiClient>("coltonstack-api");
+        services.AddSingleton<IColtonStackApiClient>(sp => sp.GetRequiredService<ColtonStackApiClient>());
+        services.AddSingleton<ISettingsStore, SettingsStore>();
 
         // The SignalR connection is a hosted service: the host starts and stops it, so no view
-        // model ever manages connection lifetime.
-        builder.Services.AddSingleton<ChatHubClient>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatHubClient>());
+        // model ever manages connection lifetime. View models see it only as IChatConnection.
+        services.AddSingleton<ChatHubClient>();
+        services.AddSingleton<IChatConnection>(sp => sp.GetRequiredService<ChatHubClient>());
+        services.AddHostedService(sp => sp.GetRequiredService<ChatHubClient>());
+    }
 
+    private static void AddViewModels(IServiceCollection services)
+    {
         // Everything the window needs, constructor-injected all the way down.
-        builder.Services.AddSingleton<ChannelListViewModel>();
-        builder.Services.AddSingleton<ChatViewModel>();
-        builder.Services.AddSingleton<StatusBarViewModel>();
-        builder.Services.AddSingleton<PeopleViewModel>();
-        builder.Services.AddSingleton<SettingsViewModel>();
-        builder.Services.AddSingleton<DiagnosticsViewModel>();
-        builder.Services.AddSingleton<MainViewModel>();
-        builder.Services.AddSingleton<MainWindow>();
-
-        return builder.Build();
-    }
-
-    /// <summary>
-    /// Phase 1 of the client extension contract: each registered extension adds services,
-    /// sidebar panes and XAML sources before the container is built. The collected resource
-    /// dictionaries are merged into Application.Resources in OnStartup.
-    /// </summary>
-    private static void RegisterClientExtensions(IServiceCollection services)
-    {
-        var paneRegistry = new SidebarPaneRegistry();
-        services.AddSingleton(paneRegistry);
-
-        var extensionContext = new ClientStartupContext(services, paneRegistry);
-        foreach (var extension in ClientExtensions)
-        {
-            extension.Configure(extensionContext);
-        }
-
-        ExtensionResources.AddRange(extensionContext.ResourceDictionaries);
-    }
-
-    /// <summary>
-    /// Typed HttpClient + resilience pipeline: retry with exponential backoff and jitter, a
-    /// circuit breaker for sustained failures, per-attempt timeout. The pipeline reports
-    /// retries and circuit changes through the messenger — the status bar just listens.
-    /// </summary>
-    private static void AddResilientApiClient(IServiceCollection services)
-    {
-        services
-            .AddHttpClient<ColtonStackApiClient>((services, client) =>
-            {
-                var options = services.GetRequiredService<IOptions<ColtonStackOptions>>().Value;
-                client.BaseAddress = new Uri(options.ServerUrl);
-                client.Timeout = Timeout.InfiniteTimeSpan; // timeouts are the pipeline's job now
-            })
-            .AddResilienceHandler("coltonstack-api", (pipeline, context) =>
-            {
-                var messenger = context.ServiceProvider.GetRequiredService<IMessenger>();
-
-                pipeline.AddRetry(new HttpRetryStrategyOptions
-                {
-                    MaxRetryAttempts = 3,
-                    Delay = TimeSpan.FromSeconds(1),
-                    BackoffType = DelayBackoffType.Exponential,
-                    UseJitter = true,
-                    OnRetry = arguments =>
-                    {
-                        messenger.Send(new HttpRetryMessage(arguments.AttemptNumber, string.Empty));
-                        return default;
-                    },
-                });
-
-                pipeline.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
-                {
-                    FailureRatio = 0.5,
-                    MinimumThroughput = 8,
-                    SamplingDuration = TimeSpan.FromSeconds(30),
-                    BreakDuration = TimeSpan.FromSeconds(15),
-                    OnOpened = _ =>
-                    {
-                        messenger.Send(new HttpRetryMessage(0, "Circuit OPEN — the server keeps failing; pausing requests for 15s"));
-                        return default;
-                    },
-                    OnClosed = _ =>
-                    {
-                        messenger.Send(new HttpRetryMessage(0, "Circuit closed — server recovered"));
-                        return default;
-                    },
-                });
-
-                pipeline.AddTimeout(new TimeoutStrategyOptions { Timeout = TimeSpan.FromSeconds(10) });
-            });
+        services.AddSingleton<ChannelListViewModel>();
+        services.AddSingleton<ChatViewModel>();
+        services.AddSingleton<StatusBarViewModel>();
+        services.AddSingleton<PeopleViewModel>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<DiagnosticsViewModel>();
+        services.AddSingleton<CommandPaletteViewModel>();
+        services.AddSingleton<MainViewModel>();
+        services.AddSingleton<MainWindow>();
     }
 }

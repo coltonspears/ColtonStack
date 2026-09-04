@@ -15,18 +15,13 @@ namespace ColtonStack.Tests;
 /// </summary>
 public sealed class PeopleViewModelTests : IDisposable
 {
-    private readonly IMessenger _messenger = WeakReferenceMessenger.Default;
+    private readonly IMessenger _messenger = new WeakReferenceMessenger();
     private readonly PeopleViewModel _vm;
 
     public PeopleViewModelTests()
     {
         // PeopleViewModel needs an IMessenger; NullLogger is fine since we don't test logging here.
-        _vm = new PeopleViewModel(
-            Substitute.For<ColtonStackApiClient>(
-                Substitute.For<HttpClient>(),
-                NullLogger<ColtonStackApiClient>.Instance),
-            _messenger,
-            NullLogger<PeopleViewModel>.Instance);
+        _vm = new PeopleViewModel(Substitute.For<IColtonStackApiClient>(), _messenger, NullLogger<PeopleViewModel>.Instance);
         _messenger.RegisterAll(_vm);
     }
 

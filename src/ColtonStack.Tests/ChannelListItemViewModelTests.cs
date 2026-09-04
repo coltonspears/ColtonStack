@@ -40,8 +40,9 @@ public sealed class ChannelListItemViewModelTests
     [Fact]
     public void Summary_ReturnsConstructorSummary()
     {
-        var item = new ChannelListItemViewModel(Summary);
-        Assert.Same(Summary, item.Summary);
+        var summary = Summary;
+        var item = new ChannelListItemViewModel(summary);
+        Assert.Same(summary, item.Summary);
     }
 
     [Fact]

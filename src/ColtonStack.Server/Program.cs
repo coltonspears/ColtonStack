@@ -2,6 +2,7 @@ using System.Net;
 using ColtonStack.Contracts;
 using ColtonStack.Server.Endpoints;
 using ColtonStack.Server.Extensions;
+using ColtonStack.Server.Extensions.Pokemon;
 using ColtonStack.Server.Hubs;
 using ColtonStack.Server.Infrastructure;
 using ColtonStack.Server.Middleware;
@@ -18,10 +19,10 @@ using Polly.Timeout;
 var builder = WebApplication.CreateBuilder(args);
 
 // The server extension list — the single compile-checked place that decides which feature
-// extensions are installed. Each one registers services and maps its own endpoints; adding
-// a feature never means editing a shared enum or a core file. In the full product each
+// extensions are installed. Each one registers services, schema and endpoints; adding a
+// feature never means editing a shared enum or a core file. In the full product each
 // extension is a separate assembly that can ship on its own cadence.
-IServerStartup[] extensions = [new AuditExtension()];
+IServerStartup[] extensions = [new AuditExtension(), new PokemonExtension()];
 
 // Phase 1: extension service registration, before the container is built.
 foreach (var extension in extensions)
@@ -42,9 +43,12 @@ builder.Services.AddValidatorsFromAssemblyContaining<UpdateProfileRequestValidat
 builder.Services.AddSingleton<IDbConnectionFactory>(_ =>
     new SqliteConnectionFactory(builder.Configuration["ColtonStack:DatabasePath"] ?? "coltonstack.db"));
 builder.Services.AddSingleton<IAuditService, AuditService>();
+builder.Services.AddSingleton<IUserService, UserService>();
 builder.Services.AddSingleton<IMessageService, MessageService>();
 builder.Services.AddSingleton<IChannelService, ChannelService>();
+builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IWebhookOutbox, WebhookOutbox>();
+builder.Services.AddSingleton<ChaosState>();
 
 // Resilience for outbound webhook delivery: per-attempt timeout, exponential retry with
 // jitter on transient failures (network errors, timeouts, 5xx), under an overall deadline.
@@ -93,6 +97,7 @@ app.MapGet("/health", () => TypedResults.Ok(new { status = "healthy" }));
 
 ChatEndpoints.Map(app);
 UserEndpoints.Map(app);
+SettingsEndpoints.Map(app);
 WebhookEndpoints.Map(app);
 AdminEndpoints.Map(app);
 

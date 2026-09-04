@@ -9,8 +9,9 @@
     <!-- The tests project is intentionally excluded from the product's analyzer rules:
          BannedApiAnalyzers would prevent the architecture tests from inspecting the Legacy/
          folder's reflection patterns, and the WPF threading analyzers don't apply to unit
-         test threads. -->
-    <NoWarn>$(NoWarn);RS0030;VSTHRD100;VSTHRD010</NoWarn>
+         test threads. CA1707 (underscores) and CA1859/CA1861 (micro-perf) fight the
+         Given_When_Then naming and inline fixtures that make tests readable. -->
+    <NoWarn>$(NoWarn);RS0030;VSTHRD100;VSTHRD010;CA1707;CA1859;CA1861;CA2000</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

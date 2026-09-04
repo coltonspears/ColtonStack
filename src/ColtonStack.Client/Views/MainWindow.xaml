@@ -6,18 +6,30 @@
         xmlns:behaviors="clr-namespace:ColtonStack.Client.Behaviors"
         xmlns:views="clr-namespace:ColtonStack.Client.Views"
         xmlns:vm="clr-namespace:ColtonStack.Client.ViewModels"
+        xmlns:attachments="clr-namespace:ColtonStack.Client.Extensions.Attachments"
         mc:Ignorable="d"
         Title="ColtonStack"
+        Icon="pack://application:,,,/ColtonStack.Client;component/Assets/ColtonStack.ico"
         Width="1340" Height="840"
         MinWidth="1020" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Background}"
         behaviors:TitleBarTheme.IsDark="True"
+        behaviors:WindowCaptionCommands.IsEnabled="True"
         FontFamily="Segoe UI" FontSize="13">
 
+    <!-- Custom chrome: the title bar is ours (search palette lives in it); resize borders and
+         caption-button semantics stay native via WindowChrome + SystemCommands. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
     <Window.InputBindings>
-        <!-- Escape dismisses the preferences overlay (a no-op when it isn't open). -->
-        <KeyBinding Key="Escape" Command="{Binding Settings.CloseCommand}" />
+        <KeyBinding Modifiers="Control" Key="K" Command="{Binding Palette.OpenCommand}" />
+        <KeyBinding Modifiers="Control" Key="F" Command="{Binding Chat.ToggleSearchCommand}" />
+        <KeyBinding Modifiers="Control" Key="OemComma" Command="{Binding ToggleSettingsCommand}" />
+        <!-- Escape closes whatever transient surface is on top (palette, settings, log panel). -->
+        <KeyBinding Key="Escape" Command="{Binding DismissCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -88,8 +100,12 @@
                                 Content="&#xE724;" Command="{Binding CreateChannelCommand}" FontSize="13"
                                 ToolTip="Create channel" />
                         <TextBox Style="{StaticResource Style.Input}" FontSize="12"
+                                 behaviors:FocusBehavior.WhenTrue="{Binding IsAddingChannel}"
                                  Text="{Binding NewChannelName, UpdateSourceTrigger=PropertyChanged}">
-                            <TextBox.ToolTip>Name the channel, press the arrow (live via SignalR on every client)</TextBox.ToolTip>
+                            <TextBox.InputBindings>
+                                <KeyBinding Key="Enter" Command="{Binding CreateChannelCommand}" />
+                            </TextBox.InputBindings>
+                            <TextBox.ToolTip>Name the channel, press Enter (live via SignalR on every client)</TextBox.ToolTip>
                         </TextBox>
                     </DockPanel>
                 </Border>
@@ -137,82 +153,316 @@
             </DockPanel>
         </DataTemplate>
 
-        <!-- Message row: rounded avatar, grouped author header, body, hover action bar -->
-        <DataTemplate x:Key="Template.Message">
-            <Grid x:Name="RowRoot" Margin="14,2,14,1" Background="Transparent">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="42" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Border Width="36" Height="36" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Top"
-                        Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
-                    <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="13"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <StackPanel Grid.Column="1" Margin="10,0,0,8">
-                    <StackPanel Orientation="Horizontal"
-                                Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
-                        <TextBlock Text="{Binding AuthorName}" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding TimeText}" Style="{StaticResource Style.Muted}" Margin="8,1,0,0" VerticalAlignment="Center" />
+        <!-- Profile settings section (core). Extension sections ship their own templates. -->
+        <DataTemplate DataType="{x:Type vm:ProfileSettingsViewModel}">
+            <StackPanel MaxWidth="520" HorizontalAlignment="Left">
+                <TextBlock Text="Profile" Style="{StaticResource Style.PageTitle}" />
+                <TextBlock Text="How you appear across the workspace. Saved on the server through the same validator the API enforces."
+                           Style="{StaticResource Style.Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,20" />
+
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="56" Height="56" CornerRadius="12" Background="{Binding AvatarColor}">
+                        <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="18"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Brush.TextStrong}" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock Text="Live preview" Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
                     </StackPanel>
-                    <!-- Renders *bold*, _italic_, ~strike~, `code` and clickable links -->
-                    <TextBlock behaviors:MessageTextFormatter.FormattedText="{Binding Text}"
-                               TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,24,0" />
                 </StackPanel>
-                <Border x:Name="HoverActions" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-12,-6,0"
-                        Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1"
-                        CornerRadius="8" Padding="6,2" Panel.ZIndex="1">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Visibility" Value="Collapsed" />
+
+                <TextBlock Text="Display name" Style="{StaticResource Style.SectionHeader}" Margin="0,22,0,6" />
+                <TextBox Style="{StaticResource Style.Input}" MaxLength="40" Width="320" HorizontalAlignment="Left"
+                         Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock Text="Avatar color" Style="{StaticResource Style.SectionHeader}" Margin="0,18,0,6" />
+                <ListBox Style="{StaticResource Style.SwatchList}"
+                         ItemsSource="{Binding Palette}"
+                         SelectedItem="{Binding AvatarColor, Mode=TwoWay}" />
+
+                <TextBlock Text="{Binding ErrorText}" Foreground="{StaticResource Brush.Red}" FontSize="12"
+                           TextWrapping="Wrap" Margin="0,10,0,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True">
-                                    <Setter Property="Visibility" Value="Visible" />
+                                <DataTrigger Binding="{Binding ErrorText}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </Border.Style>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE76E;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
-                                   Margin="5,2" Cursor="Hand" ToolTip="Add reaction" />
-                        <TextBlock Text="&#xE97A;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
-                                   Margin="5,2" Cursor="Hand" ToolTip="Reply in thread" />
-                        <TextBlock Text="&#xE712;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource Brush.TextMuted}"
-                                   Margin="5,2" Cursor="Hand" ToolTip="More actions" />
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
+                    <Button Content="Save changes" Style="{StaticResource Style.PrimaryButton}" MinWidth="110" Command="{Binding SaveCommand}" />
+                    <TextBlock Text="{Binding SavedText}" Foreground="{StaticResource Brush.Green}" Margin="12,0,0,0" VerticalAlignment="Center" FontSize="12" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Fallback for attachment kinds no installed extension renders -->
+        <DataTemplate DataType="{x:Type attachments:UnknownAttachmentViewModel}">
+            <Border Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1"
+                    CornerRadius="8" Padding="12,8" HorizontalAlignment="Left" Margin="0,6,0,0">
+                <TextBlock Style="{StaticResource Style.Muted}" FontSize="12">
+                    <Run Text="This message has a" /><Run Text=" " /><Run Text="{Binding Kind, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" attachment this client can't render — install the extension." />
+                </TextBlock>
+            </Border>
+        </DataTemplate>
+
+        <!-- Message row: date divider, rounded avatar, grouped author header, body, attachment, hover copy -->
+        <DataTemplate x:Key="Template.Message">
+            <StackPanel>
+                <!-- Slack-style date divider above the first message of each day -->
+                <Grid Margin="14,12,14,6" Visibility="{Binding IsFirstOfDay, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <Rectangle Height="1" Fill="{StaticResource Brush.Border}" VerticalAlignment="Center" />
+                    <Border HorizontalAlignment="Center" Background="{StaticResource Brush.Background}" BorderBrush="{StaticResource Brush.Border}"
+                            BorderThickness="1" CornerRadius="12" Padding="12,3">
+                        <TextBlock Text="{Binding DateHeader}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextStrong}" />
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="RowRoot" Margin="14,1,14,1" Background="Transparent">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="42" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="36" Height="36" CornerRadius="8" Background="{Binding AvatarColor}" VerticalAlignment="Top" Margin="0,3,0,0"
+                            Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
+                        <TextBlock Text="{Binding Initials}" Foreground="White" FontWeight="SemiBold" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="10,2,0,6">
+                        <StackPanel Orientation="Horizontal"
+                                    Visibility="{Binding IsFirstOfGroup, Converter={StaticResource Converter.BoolToVisibility}}">
+                            <TextBlock Text="{Binding AuthorName}" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding TimeText}" Style="{StaticResource Style.Muted}" Margin="8,1,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <!-- Renders *bold*, _italic_, ~strike~, `code` and clickable links -->
+                        <TextBlock behaviors:MessageTextFormatter.FormattedText="{Binding Text}"
+                                   TextWrapping="Wrap" Foreground="{StaticResource Brush.Text}" Margin="0,1,40,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <!-- Extension-rendered rich content: implicit DataTemplate per attachment view model type -->
+                        <ContentControl Content="{Binding Attachment}" Focusable="False"
+                                        Visibility="{Binding HasAttachment, Converter={StaticResource Converter.BoolToVisibility}}" />
                     </StackPanel>
+                    <Border x:Name="HoverActions" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-10,-6,0"
+                            Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1"
+                            CornerRadius="8" Padding="2" Panel.ZIndex="1">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Button Style="{StaticResource Style.IconButton}" Content="&#xE8C8;" ToolTip="Copy message text"
+                                behaviors:ClipboardActions.CopyText="{Binding Text}" />
+                    </Border>
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource Brush.RowHover}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Command palette row -->
+        <DataTemplate x:Key="Template.PaletteItem">
+            <Grid Background="Transparent">
+                <Grid.InputBindings>
+                    <MouseBinding MouseAction="LeftClick"
+                                  Command="{Binding DataContext.Palette.RunItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}" />
+                </Grid.InputBindings>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding IconGlyph}" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                <StackPanel Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                               Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                    <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource Brush.TextMuted}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                </StackPanel>
+                <Border Grid.Column="2" Style="{StaticResource Style.KeyChip}" Margin="10,0,0,0">
+                    <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{StaticResource Brush.TextMuted}" />
                 </Border>
-                <Grid.Style>
-                    <Style TargetType="Grid">
-                        <Setter Property="Background" Value="Transparent" />
-                        <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{StaticResource Brush.RowHover}" />
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </Grid.Style>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Slash-command suggestion row -->
+        <DataTemplate x:Key="Template.SlashSuggestion">
+            <Grid Background="Transparent">
+                <Grid.InputBindings>
+                    <MouseBinding MouseAction="LeftClick"
+                                  Command="{Binding DataContext.Chat.PickSuggestionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}" />
+                </Grid.InputBindings>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                <TextBlock Grid.Column="1" Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource Brush.TextMuted}" Margin="14,1,0,0" VerticalAlignment="Center" />
             </Grid>
         </DataTemplate>
     </Window.Resources>
 
+    <!-- WindowChrome + maximize overflows by the resize border; the trigger compensates. -->
     <Grid>
+        <Grid.Style>
+            <Style TargetType="Grid">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                        <Setter Property="Margin" Value="7" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Grid.Style>
         <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0">
+        <!-- ============================ Title bar ============================ -->
+        <Border Grid.Row="0" Background="{StaticResource Brush.Rail}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Image Source="pack://application:,,,/ColtonStack.Client;component/Assets/ColtonStack.ico" Width="18" Height="18" />
+                    <TextBlock Text="ColtonStack" Foreground="{StaticResource Brush.TextStrong}" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- The palette launcher: Ctrl+K or click. The popup below is the palette itself. -->
+                <Button x:Name="PaletteLauncher" Grid.Column="1" Style="{StaticResource Style.PaletteLauncher}" Width="520"
+                        Command="{Binding Palette.OpenCommand}" ToolTip="Search commands, channels and settings (Ctrl+K)">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource Brush.TextMuted}" />
+                            <TextBlock Text="Search ColtonStack — commands, channels, settings" Margin="8,0,0,0" FontSize="12" Foreground="{StaticResource Brush.TextMuted}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Border Style="{StaticResource Style.KeyChip}" HorizontalAlignment="Right">
+                            <TextBlock Text="Ctrl+K" FontSize="10" Foreground="{StaticResource Brush.TextMuted}" />
+                        </Border>
+                    </Grid>
+                </Button>
+
+                <Popup IsOpen="{Binding Palette.IsOpen, Mode=TwoWay}" StaysOpen="False"
+                       PlacementTarget="{Binding ElementName=PaletteLauncher}" Placement="Bottom"
+                       AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="6" Width="560">
+                    <Border Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" CornerRadius="10">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,0,1" Padding="12,10">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Left" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center"
+                                               Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,10,0" />
+                                    <Border DockPanel.Dock="Right" Style="{StaticResource Style.KeyChip}">
+                                        <TextBlock Text="Esc" FontSize="10" Foreground="{StaticResource Brush.TextMuted}" />
+                                    </Border>
+                                    <TextBox Style="{StaticResource Style.BorderlessInput}" FontSize="14" VerticalContentAlignment="Center"
+                                             behaviors:FocusBehavior.WhenTrue="{Binding Palette.IsOpen}"
+                                             Text="{Binding Palette.Query, UpdateSourceTrigger=PropertyChanged}">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Down" Command="{Binding Palette.MoveDownCommand}" />
+                                            <KeyBinding Key="Up" Command="{Binding Palette.MoveUpCommand}" />
+                                            <KeyBinding Key="Enter" Command="{Binding Palette.RunSelectedCommand}" />
+                                            <KeyBinding Key="Escape" Command="{Binding Palette.CloseCommand}" />
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                </DockPanel>
+                            </Border>
+                            <TextBlock DockPanel.Dock="Bottom" Margin="14,6,14,10" Style="{StaticResource Style.Muted}"
+                                       Text="Every row here was registered by an extension — the palette holds no list of its own." />
+                            <TextBlock Text="No matching commands." Margin="14,14" FontSize="12">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Style.Muted}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Palette.HasResults}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <ListBox ItemsSource="{Binding Palette.Results}" SelectedItem="{Binding Palette.Selected, Mode=TwoWay}"
+                                     ItemTemplate="{StaticResource Template.PaletteItem}" Style="{StaticResource Style.ResultList}"
+                                     MaxHeight="420" HorizontalContentAlignment="Stretch" />
+                        </DockPanel>
+                    </Border>
+                </Popup>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                    <Button Style="{StaticResource Style.CaptionButton}" Content="&#xE921;" Command="{x:Static SystemCommands.MinimizeWindowCommand}" ToolTip="Minimize" />
+                    <Button Content="&#xE922;" Command="{x:Static SystemCommands.MaximizeWindowCommand}" ToolTip="Maximize">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Style.CaptionButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="&#xE923;" Command="{x:Static SystemCommands.RestoreWindowCommand}" ToolTip="Restore">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Style.CaptionButton}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Style="{StaticResource Style.CaptionCloseButton}" Content="&#xE8BB;" Command="{x:Static SystemCommands.CloseWindowCommand}" ToolTip="Close" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ============================ Body ============================ -->
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="68" />
                 <ColumnDefinition Width="264" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- ============================ Workspace rail ============================ -->
+            <!-- Workspace rail -->
             <Border Grid.Column="0" Background="{StaticResource Brush.Rail}">
                 <DockPanel>
-                    <Button DockPanel.Dock="Bottom" Style="{StaticResource Style.RailButton}" Content="&#xE713;" HorizontalAlignment="Center"
-                            Margin="0,4,0,12" ToolTip="Preferences" Command="{Binding Settings.OpenCommand}" />
+                    <ToggleButton DockPanel.Dock="Bottom" Style="{StaticResource Style.RailToggleButton}" Content="&#xE713;" HorizontalAlignment="Center"
+                                  Margin="0,4,0,12" ToolTip="Settings (Ctrl+,)" IsChecked="{Binding IsSettingsOpen, Mode=TwoWay}" />
                     <Border DockPanel.Dock="Top" Width="42" Height="42" CornerRadius="11" Background="{StaticResource Brush.Aubergine}"
                             HorizontalAlignment="Center" Margin="0,14,0,8">
                         <TextBlock Text="CS" Foreground="White" FontWeight="Bold" FontSize="15"
@@ -235,10 +485,8 @@
                 </DockPanel>
             </Border>
 
-            <!-- ============================ Sidebar ============================ -->
+            <!-- Sidebar: the active pane's view model renders here through its implicit DataTemplate. -->
             <Border Grid.Column="1" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,1,0">
-                <!-- The active pane's view model renders here through its implicit DataTemplate.
-                     The shell knows nothing about pane contents; extensions bring their own. -->
                 <ContentControl Content="{Binding ActiveContent}"
                                 HorizontalContentAlignment="Stretch"
                                 VerticalContentAlignment="Stretch"
@@ -247,7 +495,17 @@
 
             <!-- ============================ Conversation ============================ -->
             <Grid Grid.Column="2">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSettingsOpen}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -285,31 +543,64 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBox x:Name="SearchBox" Style="{StaticResource Style.Input}" FontSize="12"
-                                 Text="{Binding Chat.SearchText, UpdateSourceTrigger=PropertyChanged}"
-                                 behaviors:ComposerActions.Target="{Binding ElementName=SearchBox}">
+                        <TextBox Style="{StaticResource Style.Input}" FontSize="12"
+                                 behaviors:FocusBehavior.WhenTrue="{Binding Chat.IsSearchActive}"
+                                 Text="{Binding Chat.SearchText, UpdateSourceTrigger=PropertyChanged}">
                             <TextBox.ToolTip>Search messages — pauses as you type, applies instantly</TextBox.ToolTip>
                         </TextBox>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="6,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Chat.SearchResultCount, StringFormat={}{0} result(s)}" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"
-                                       Foreground="{StaticResource Brush.TextMuted}" Visibility="{Binding Chat.IsSearchActive, Converter={StaticResource Converter.BoolToVisibility}}" />
-                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE711;" Command="{Binding Chat.ClearSearchCommand}"
-                                    ToolTip="Clear search" />
+                            <TextBlock Text="{Binding Chat.Search.Count, StringFormat={}{0} result(s)}" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"
+                                       Foreground="{StaticResource Brush.TextMuted}" />
+                            <Button Style="{StaticResource Style.IconButton}" Content="&#xE711;" Command="{Binding Chat.ToggleSearchCommand}"
+                                    ToolTip="Close search (Esc)" />
                         </StackPanel>
                     </Grid>
                 </Border>
 
                 <ListBox Grid.Row="2"
-                         ItemsSource="{Binding Chat.FilteredMessages}"
+                         ItemsSource="{Binding Chat.Search.Results}"
                          ItemTemplate="{StaticResource Template.Message}"
+                         ItemContainerStyle="{StaticResource Style.PlainItem}"
                          Style="{StaticResource Style.ChatList}"
                          behaviors:AutoScrollBehavior.ScrollToNewItem="True"
                          HorizontalContentAlignment="Stretch" />
 
+                <!-- Empty state -->
+                <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding Chat.Search.Count}" Value="0" />
+                                        <Condition Binding="{Binding Chat.IsLoadingHistory}" Value="False" />
+                                        <Condition Binding="{Binding Chat.HasChannel}" Value="True" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="&#xE8BD;" FontFamily="Segoe MDL2 Assets" FontSize="34" Foreground="{StaticResource Brush.Border}" HorizontalAlignment="Center" />
+                    <TextBlock Margin="0,12,0,0" FontSize="14" Foreground="{StaticResource Brush.TextMuted}" HorizontalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="Nothing here yet — say hello, or type / for commands." />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Chat.Search.IsFiltering}" Value="True">
+                                        <Setter Property="Text" Value="No messages match your search." />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
                 <!-- Composer. Every toolbar button below (including the emoji tiles inside the
                      popup) inherits ComposerActions.Target from this Border — one binding,
                      wrap/insert behavior everywhere, zero code-behind. -->
-                <Border Grid.Row="2" Margin="14,4,18,14" CornerRadius="10" Background="{StaticResource Brush.Surface}"
+                <Border x:Name="Composer" Grid.Row="3" Margin="14,4,18,14" CornerRadius="10" Background="{StaticResource Brush.Surface}"
                         BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" Padding="12,8"
                         behaviors:ComposerActions.Target="{Binding ElementName=ComposerBox}">
                     <Border.Style>
@@ -322,6 +613,26 @@
                         </Style>
                     </Border.Style>
                     <StackPanel>
+                        <!-- Slash-command suggestions: driven entirely by Chat.Slash state -->
+                        <Popup IsOpen="{Binding Chat.Slash.HasSuggestions, Mode=OneWay}" StaysOpen="True"
+                               PlacementTarget="{Binding ElementName=Composer}" Placement="Top"
+                               AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="-6"
+                               Width="{Binding ActualWidth, ElementName=Composer}">
+                            <Border Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="1" CornerRadius="10">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,6">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="↑↓ choose · Tab complete · Enter run" Style="{StaticResource Style.Muted}" />
+                                            <TextBlock Text="{Binding Chat.Slash.StatusText}" Style="{StaticResource Style.Muted}" Foreground="{StaticResource Brush.Text}" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                    </Border>
+                                    <ListBox ItemsSource="{Binding Chat.Slash.Suggestions}" SelectedItem="{Binding Chat.Slash.Selected, Mode=TwoWay}"
+                                             ItemTemplate="{StaticResource Template.SlashSuggestion}" Style="{StaticResource Style.ResultList}"
+                                             MaxHeight="260" HorizontalContentAlignment="Stretch" />
+                                </DockPanel>
+                            </Border>
+                        </Popup>
+
                         <Grid MinHeight="40">
                             <TextBlock Text="{Binding Chat.ComposerPlaceholder}" Foreground="{StaticResource Brush.TextMuted}" IsHitTestVisible="False">
                                 <TextBlock.Style>
@@ -336,14 +647,19 @@
                                 </TextBlock.Style>
                             </TextBlock>
                             <TextBox x:Name="ComposerBox" Style="{StaticResource Style.BorderlessInput}" FontSize="13.5"
-                                     MinHeight="40" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
+                                     MinHeight="40" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap" VerticalContentAlignment="Top"
                                      Text="{Binding Chat.Draft, UpdateSourceTrigger=PropertyChanged}">
-                                <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line</TextBox.ToolTip>
+                                <TextBox.ToolTip>Enter sends · Shift+Enter makes a new line · / for commands</TextBox.ToolTip>
                                 <TextBox.InputBindings>
                                     <!-- Plain Enter sends (input bindings run before the TextBox inserts the
                                          newline); Shift+Enter doesn't match the gesture, so it falls through
-                                         to AcceptsReturn and makes a new line. No code-behind required. -->
+                                         to AcceptsReturn and makes a new line. The slash bindings only
+                                         CanExecute while the suggestion popup is open, so Up/Down/Tab keep
+                                         their normal meaning otherwise. No code-behind required. -->
                                     <KeyBinding Key="Enter" Command="{Binding Chat.SendMessageCommand}" />
+                                    <KeyBinding Key="Down" Command="{Binding Chat.NextSuggestionCommand}" />
+                                    <KeyBinding Key="Up" Command="{Binding Chat.PreviousSuggestionCommand}" />
+                                    <KeyBinding Key="Tab" Command="{Binding Chat.AcceptSuggestionCommand}" />
                                 </TextBox.InputBindings>
                             </TextBox>
                         </Grid>
@@ -382,6 +698,8 @@
                                         </ItemsControl>
                                     </Border>
                                 </Popup>
+                                <Button Style="{StaticResource Style.FormatButton}" FontFamily="Segoe UI" FontWeight="Bold" Content="/" Margin="2,0,0,0"
+                                        behaviors:ComposerActions.Insert="/" ToolTip="Slash commands — /pokemon, /shrug, …" />
                             </StackPanel>
                             <Button HorizontalAlignment="Right" Style="{StaticResource Style.PrimaryButton}" Padding="10,5"
                                     Command="{Binding Chat.SendMessageCommand}" ToolTip="Send (Enter)">
@@ -391,10 +709,55 @@
                     </StackPanel>
                 </Border>
             </Grid>
+
+            <!-- ============================ Settings page (in-window) ============================ -->
+            <Grid Grid.Column="2" Visibility="{Binding IsSettingsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="240" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,0,1,0">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Settings" Style="{StaticResource Style.WorkspaceTitle}" FontSize="16" Margin="16,16,16,10" />
+                        <!-- Sections come from the settings registry; core and extensions alike. -->
+                        <ListBox ItemsSource="{Binding Settings.Sections}" SelectedItem="{Binding Settings.ActiveSection, Mode=TwoWay}"
+                                 Style="{StaticResource Style.SettingsNav}" HorizontalContentAlignment="Stretch">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="26" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding IconGlyph}" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Top" Margin="0,2,0,0"
+                                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+                                            <TextBlock Text="{Binding Description}" FontSize="11" Foreground="{StaticResource Brush.TextMuted}" TextWrapping="Wrap" Margin="0,1,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+
+                <DockPanel Grid.Column="1">
+                    <Grid DockPanel.Dock="Top" Margin="0,8,12,0">
+                        <Button Style="{StaticResource Style.IconButton}" Content="&#xE711;" HorizontalAlignment="Right"
+                                Command="{Binding CloseSettingsCommand}" ToolTip="Back to chat (Esc)" />
+                    </Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="32,8,32,32">
+                        <ContentControl Content="{Binding Settings.ActiveContent}" Focusable="False" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
         </Grid>
 
         <!-- ============================ Status bar ============================ -->
-        <Border Grid.Row="1" Grid.ColumnSpan="3" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,7">
+        <Border Grid.Row="2" Background="{StaticResource Brush.Sidebar}" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,7">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <ToggleButton Style="{StaticResource Style.PillToggle}" Content="logs"
@@ -412,7 +775,7 @@
                 </Border>
                 <Border Style="{StaticResource Style.StatusChip}">
                     <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="9" Height="9" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Status.Status, Mode=OneWay}">
+                        <Ellipse Width="9" Height="9" VerticalAlignment="Center" Margin="0,0,8,0">
                             <Ellipse.Style>
                                 <Style TargetType="Ellipse">
                                     <Setter Property="Fill" Value="{StaticResource Brush.Amber}" />
@@ -437,7 +800,7 @@
         <!-- Live ILogger output: the DiagnosticsLoggerProvider publishes entries onto the
              messenger and this panel subscribes like any other view model. The toggle lives
              on the status bar ("logs"). Bounded buffer (400 entries) — a tail, not a database. -->
-        <Grid Grid.RowSpan="2" Visibility="{Binding Diagnostics.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
+        <Grid Grid.Row="1" Grid.RowSpan="2" Visibility="{Binding Diagnostics.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
             <Border Width="440" HorizontalAlignment="Right"
                     Background="{StaticResource Brush.Background}" BorderBrush="{StaticResource Brush.Border}"
                     BorderThickness="1,0,0,0">
@@ -458,8 +821,9 @@
 
                     <ListBox ItemsSource="{Binding Diagnostics.Entries}"
                              Style="{StaticResource Style.ChatList}"
+                             ItemContainerStyle="{StaticResource Style.PlainItem}"
                              HorizontalContentAlignment="Stretch"
-                             BorderThickness="0" Background="Transparent">
+                             behaviors:AutoScrollBehavior.ScrollToNewItem="True">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="10,3">
@@ -500,62 +864,6 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                 </DockPanel>
-            </Border>
-        </Grid>
-
-        <!-- ============================ Preferences overlay ============================ -->
-        <!-- Loaded from and saved to the server (Dapper.Contrib UPDATE); Escape or Cancel closes. -->
-        <Grid Grid.RowSpan="2" Visibility="{Binding Settings.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}">
-            <Border Background="#B3000000" />
-            <Border Width="400" VerticalAlignment="Center" HorizontalAlignment="Center"
-                    Background="{StaticResource Brush.Background}" BorderBrush="{StaticResource Brush.Border}"
-                    BorderThickness="1" CornerRadius="12" Padding="22,18">
-                <StackPanel>
-                    <Grid>
-                        <TextBlock Text="Preferences" Style="{StaticResource Style.WorkspaceTitle}" FontSize="16" VerticalAlignment="Center" />
-                        <Button HorizontalAlignment="Right" Style="{StaticResource Style.IconButton}" Content="&#xE711;"
-                                Command="{Binding Settings.CloseCommand}" ToolTip="Close (Esc)" />
-                    </Grid>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                        <Border Width="44" Height="44" CornerRadius="10" Background="{Binding Settings.AvatarColor}">
-                            <TextBlock Text="{Binding Settings.Initials}" Foreground="White" FontWeight="SemiBold" FontSize="15"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="How you appear across the workspace." Foreground="{StaticResource Brush.Text}" FontSize="12" />
-                            <TextBlock Text="Saved on the server — it survives restarts." Style="{StaticResource Style.Muted}" Margin="0,2,0,0" />
-                        </StackPanel>
-                    </StackPanel>
-
-                    <TextBlock Text="Display name" Style="{StaticResource Style.SectionHeader}" Margin="0,16,0,6" />
-                    <TextBox Style="{StaticResource Style.Input}" MaxLength="40"
-                             Text="{Binding Settings.DisplayName, UpdateSourceTrigger=PropertyChanged}" />
-
-                    <TextBlock Text="Avatar color" Style="{StaticResource Style.SectionHeader}" Margin="0,14,0,6" />
-                    <ListBox Style="{StaticResource Style.SwatchList}"
-                             ItemsSource="{Binding Settings.Palette}"
-                             SelectedItem="{Binding Settings.AvatarColor, Mode=TwoWay}" />
-
-                    <TextBlock Text="{Binding Settings.ErrorText}" Foreground="{StaticResource Brush.Red}" FontSize="12"
-                               TextWrapping="Wrap" Margin="0,10,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Settings.ErrorText}" Value="">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-                        <Button Content="Cancel" Style="{StaticResource Style.GhostButton}" Command="{Binding Settings.CloseCommand}" />
-                        <Button Content="Save" Style="{StaticResource Style.PrimaryButton}" MinWidth="72" Margin="8,0,0,0"
-                                Command="{Binding Settings.SaveCommand}" />
-                    </StackPanel>
-                </StackPanel>
             </Border>
         </Grid>
     </Grid>

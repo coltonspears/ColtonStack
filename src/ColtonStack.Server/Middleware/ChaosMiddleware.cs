@@ -8,19 +8,11 @@ namespace ColtonStack.Server.Middleware;
 /// Deliberately never touches <c>/api/chaos</c> itself, <c>/health</c>, or the SignalR hub,
 /// so you can always turn the chaos back off.
 /// </summary>
-public sealed class ChaosMiddleware(RequestDelegate next)
+public sealed class ChaosMiddleware(RequestDelegate next, ChaosState state)
 {
-    private static int _enabled;
-
-    public static bool Enabled
-    {
-        get => Volatile.Read(ref _enabled) == 1;
-        set => Volatile.Write(ref _enabled, value ? 1 : 0);
-    }
-
     public async Task InvokeAsync(HttpContext context)
     {
-        if (Enabled && IsChaosCandidate(context.Request.Path) && Random.Shared.NextDouble() < 0.4)
+        if (state.Enabled && IsChaosCandidate(context.Request.Path) && Random.Shared.NextDouble() < 0.4)
         {
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             context.Response.Headers.RetryAfter = "1";

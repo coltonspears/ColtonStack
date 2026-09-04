@@ -40,7 +40,6 @@ public sealed class PersonViewModelTests
     [Fact]
     public void ViewModel_IsNotObservableObject()
     {
-        var vm = new PersonViewModel(new ColtonStack.Contracts.UserDto(1, "A", "#000", IsSelf: false));
-        Assert.False(vm is System.ComponentModel.INotifyPropertyChanged);
+        Assert.False(typeof(System.ComponentModel.INotifyPropertyChanged).IsAssignableFrom(typeof(PersonViewModel)));
     }
 }

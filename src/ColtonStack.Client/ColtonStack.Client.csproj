@@ -5,6 +5,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ColtonStack.ico</ApplicationIcon>
     <Description>ColtonStack desktop client — MVVM Toolkit + Generic Host + SignalR demo.</Description>
     <!-- Only for [LibraryImport]-generated marshalling (TitleBarTheme's DWM call) — no hand-written unsafe code. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -28,6 +29,10 @@
 
   <ItemGroup>
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)..\..\BannedSymbols.txt" Link="BannedSymbols.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\ColtonStack.ico" />
   </ItemGroup>
 
   <ItemGroup>

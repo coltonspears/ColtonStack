@@ -31,13 +31,15 @@ dotnet test ColtonStack.sln
 ```
 
 Then:
-1. Click **sim** in the status bar — teammates start typing and posting every 5–15 seconds.
-2. Click **chaos** in the status bar — ~40% of API requests fail with 503. Watch the retry counter and circuit breaker messages in the status bar.
-3. Click the **search icon** (🔍) in the conversation header — type any word to filter messages with debounced live search.
-4. Click **logs** in the status bar — the diagnostics panel shows the app's own ILogger output live (retries, reconnects, catch‑ups).
-5. Click the **audit icon** in the rail (History glyph) — the audit trail pane, contributed by the audit extension without a single core‑app edit.
-6. Click your avatar color in the rail (bottom‑left) to open **Preferences** — change your display name and color, saved to the server through the resilience pipeline. The same FluentValidation rules enforce valid input client-side (before the save button enables) and server-side (before the database is touched).
-7. Register a webhook at the `WebhookSink` URL (`http://localhost:5090/webhook`) via the server's `/api/webhooks` endpoint and watch HMAC‑signed deliveries arrive.
+1. Press **Ctrl+K** (or click the search box in the title bar) — the **command palette**. Every row was contributed by an extension: jump to a channel, open a pane, toggle the simulator or chaos mode, open a settings section. The palette itself holds no list of its own.
+2. Type **`/pokemon pika`** in the composer — the autocomplete popup fills from the server's cached name index; press Enter to post a **Pokémon card** (artwork, types, abilities, moves, Pokédex entry, base stats). The card is fetched once from [PokeAPI](https://pokeapi.co), persisted in SQLite, and rendered by the extension through a message attachment the core knows nothing about. `/shrug` is the minimal slash command for contrast.
+3. Click **sim** in the status bar — teammates start typing and posting every 5–15 seconds.
+4. Click **chaos** in the status bar — ~40% of API requests fail with 503. Watch the retry counter and circuit breaker messages in the status bar.
+5. Press **Ctrl+F** (or the 🔍 in the conversation header) — type any word to filter messages with debounced live search.
+6. Click **logs** in the status bar — the diagnostics panel shows the app's own ILogger output live (retries, reconnects, catch‑ups).
+7. Click the **audit icon** in the rail (History glyph) — the audit trail pane, contributed by the audit extension without a single core‑app edit.
+8. Press **Ctrl+,** (or the gear in the rail) — **Settings**, now an in‑window page. *Profile* is the core section; *Pokémon cards* and *Audit* are contributed by their extensions and persist on the server under keys the extension owns (`pokemon.artwork`, `audit.pagesize`). Switch Pokémon artwork to "pixel sprite" and the next card you post uses it. The same FluentValidation rules enforce valid profile input client‑side (before the save button enables) and server‑side (before the database is touched).
+9. Register a webhook at the `WebhookSink` URL (`http://localhost:5090/webhook`) via the server's `/api/webhooks` endpoint and watch HMAC‑signed deliveries arrive.
 
 ---
 
@@ -97,6 +99,10 @@ Then:
 
 **Key principle:** View models communicate through a message bus (`IMessenger`), never by holding direct references to each other. `ChannelListViewModel` publishes `ChannelSelectedMessage`; `ChatViewModel` reacts by loading history and switching groups. Neither knows the other exists.
 
+**Seams, not concretions:** view models depend on `IColtonStackApiClient` and `IChatConnection`, never on the typed `HttpClient` wrapper or the SignalR connection. That is what lets `ChatViewModelTests` substitute the whole network in two lines and run on a thread‑pool thread — and it is a `NetArchTest` rule that view models never reference `System.Windows` at all, so no `Dispatcher` can creep back in.
+
+**Composition inside a view model:** `ChatViewModel` is the busiest class in the client, and it stays small by *owning* two focused collaborators rather than growing regions: `MessageSearch` (live text filter over the conversation, WPF‑free) and `SlashCommandInput` (parses `/command arg`, produces suggestions). Each has its own test file; the chat view model just wires them.
+
 ---
 
 ## Before / After — Side‑by‑Side Comparisons
@@ -107,14 +113,16 @@ Every comparison below is real code from this repository.
 
 **Modern (`MessageViewModel.cs`):**
 ```csharp
-public sealed class MessageViewModel(MessageDto message, bool isFirstOfGroup)
+public sealed class MessageViewModel(MessageDto message, bool isFirstOfGroup, bool isFirstOfDay = false, object? attachment = null)
 {
     public long Id { get; } = message.Id;
     public string AuthorName { get; } = message.AuthorName;
-    public string AvatarColor { get; } = message.AvatarColor;
+    public string AvatarColor { get; } = message.AuthorColor;
     public string Text { get; } = message.Text;
     public DateTimeOffset CreatedAtUtc { get; } = message.CreatedAtUtc;
     public bool IsFirstOfGroup { get; } = isFirstOfGroup;
+    public bool IsFirstOfDay { get; } = isFirstOfDay;
+    public object? Attachment { get; } = attachment;   // extension-rendered rich content, or null
     public string Initials { get; } = NameInitials.From(message.AuthorName);
     public string TimeText { get; } = message.CreatedAtUtc.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 }
@@ -263,6 +271,14 @@ StatusBarViewModelTests        → Tests messenger‑driven state changes
 PeopleViewModelTests           → Tests profile‑update propagation
 ValidatorTests                 → Tests shared FluentValidation rules for profile, messages, channels
 SidebarPaneRegistryTests       → Tests the extension surface: ordering, duplicate guard, lazy content
+CommandRegistryTests           → Duplicate ids/slash names, late attach, palette matching
+SlashCommandInputTests         → "/" → name completion → argument autocomplete → resolve
+MessageSearchTests             → Live filter stays correct as messages keep arriving
+ChatViewModelTests             → History grouping, dedupe, send/fail/restore, slash dispatch, attachments — no HTTP, no SignalR
+SettingsStoreTests             → Snapshot, lenient typed getters, change broadcast, server‑down fallback
+SettingsViewModelTests         → Sections come from the registry; content is lazy and built once
+SettingKeyTests                → One key grammar validated on both sides
+PokemonCardMapperTests         → PokeAPI → card flattening (slot order, hidden abilities, flavor text cleanup)
 ArchitectureTests              → EXECUTED ARCHITECTURE — the conventions are build failures if broken
 ```
 
@@ -281,6 +297,10 @@ ArchitectureTests              → EXECUTED ARCHITECTURE — the conventions are
 | Contracts stay pure (no WPF, no ASP.NET, no host projects) | A DTO dragging its runtime into both processes |
 | Server service classes are sealed and concrete | Inheritance hierarchies in the data layer |
 | Server never depends on the client | Reverse dependency (always a design smell) |
+| View models never depend on `System.Windows` | A `Dispatcher.Invoke` or `ICollectionView` making view models untestable |
+| Client core (view models, services, behaviors) never references an installed extension | Removing an extension from `App`'s list breaking the build |
+| Server core (services, endpoints, infrastructure, hubs) never references an installed extension | Same rule, server side |
+| The Pokémon extension never references a core view model | "Extension" becoming a folder inside the god class |
 
 A violation fails `dotnet test` — same category of failure as a compile error, which is the point.
 
@@ -310,13 +330,13 @@ ColtonStack demonstrates the other way: **extensions are plain classes, listed e
 
 ```csharp
 // Server — Program.cs. The whole extension surface is this line:
-IServerStartup[] extensions = [new AuditExtension()];
+IServerStartup[] extensions = [new AuditExtension(), new PokemonExtension()];
 foreach (var extension in extensions) extension.ConfigureServices(builder.Services, builder.Configuration);
 // ...after build:
 foreach (var extension in extensions) extension.ConfigureApp(app);
 
 // Client — App.xaml.cs. Same shape:
-private static readonly IClientStartup[] ClientExtensions = [new CorePanesExtension(), new AuditPaneExtension()];
+private static readonly IClientStartup[] ClientExtensions = [new CorePanesExtension(), new AuditPaneExtension(), new PokemonExtension()];
 ```
 
 What's installed is a compile‑checked line of code — no assembly scanning, no attribute discovery, no runtime archaeology. A typo is a build error, not a missing feature in production. In the full product each extension is its own assembly shipping on its own cadence; the contract is identical.
@@ -351,6 +371,50 @@ The audit feature shows the full pattern across both planes: `AuditExtension` (s
 
 **Why explicit lists instead of scanning?** Deliberate, and it's the same trade as everywhere else in this demo: explicit registration is testable, debuggable, and compile‑checked. The `SidebarPaneRegistryTests` prove the registry's contract (ordering, duplicate detection, lazy creation) without any host running. Legacy‑style discovery would reintroduce the exact "mysterious things happen behind the scenes" problem this app exists to argue against.
 
+### The whole extension surface
+
+`IClientStartupContext` hands an extension five registries plus the service collection. Every one is the same shape as the pane registry — plain definition classes with delegates, duplicate ids throw at startup, content resolves lazily through DI:
+
+| Registry | What an extension contributes | Where it shows up |
+|---|---|---|
+| `Panes` | `SidebarPaneDefinition` | The rail + sidebar |
+| `Commands` | `CommandDefinition` (optionally with a `slashName` and argument `suggestAsync`) and `CommandItemSource` (dynamic rows) | The **Ctrl+K palette** and the composer's **`/` popup** |
+| `Settings` | `SettingsSectionDefinition` | The in‑window **Settings** page |
+| `Attachments` | a renderer for one attachment `Kind` | Rich content inside chat messages |
+| `AddResourceDictionary` | XAML with implicit `DataTemplate`s for the above | Merged at startup, resolved by type |
+
+On the server, `IServerStartup` gives an extension `ConfigureServices` + `ConfigureApp` (its own options, typed `HttpClient`s, endpoints) and `ISchemaContributor` lets it own a table without editing the core initializer.
+
+Two cross‑cutting services exist so extensions never build their own plumbing:
+
+- **`ISettingsStore`** (client) ↔ `/api/settings` (server): key/value preferences persisted in SQLite. Extensions read synchronously from the in‑memory snapshot (`GetString/GetBool/GetInt` with fallbacks) and write with `SetAsync`, which broadcasts `SettingChangedMessage`. Keys are validated by one shared `SettingKey` rule on both sides.
+- **`ResilientHttpClient.AddColtonStackHttpClient<T>()`**: every typed client against the ColtonStack server — core or extension — gets the same base address and the same retry/circuit‑breaker/timeout pipeline. Nobody re‑implements retry logic.
+
+### The Pokémon extension — a REST API, a cache, a card
+
+`/pokemon` is the end‑to‑end sample of "call a third‑party REST API and persist what comes back":
+
+```
+composer "/pokemon pika"
+   └─ SlashCommandInput → CommandDefinition.SuggestAsync
+        └─ IPokemonApi.SearchAsync            GET /api/pokemon/search?q=pika       (client → server)
+             └─ PokemonService (in-memory name index, loaded once from PokeAPI)
+Enter
+   └─ CommandDefinition.ExecuteAsync
+        └─ IPokemonApi.ShareAsync             POST /api/channels/{id}/pokemon/pikachu
+             └─ PokemonService.GetCardAsync
+                  ├─ PokemonCards table hit?  → return cached CardJson            (Dapper.Contrib GetAsync)
+                  └─ miss → PokeApiClient (typed HttpClient + standard resilience handler)
+                             GET pokemon/pikachu + GET pokemon-species/25
+                             → PokemonCardMapper.Map (pure function, unit-tested)
+                             → InsertAsync into PokemonCards
+             └─ IMessageService.SendAsync(text, attachment: { Kind: "pokemon", PayloadJson })
+                  └─ SignalR broadcast → every client's IAttachmentRegistry.Materialize
+                                          → PokemonCardViewModel → implicit DataTemplate
+```
+
+Nothing in the core knows what a Pokémon is. The core carries an opaque `MessageAttachmentDto(Kind, PayloadJson)`; the extension registers the `"pokemon"` kind on the client and ships the XAML. The card respects the extension's own settings section (official artwork vs. pixel sprite, shiny by default), read through the core settings store. PokeAPI payloads are parsed by a **second source‑generated JSON context** (`PokeApiJsonContext`, snake_case) — third‑party JSON gets the same zero‑reflection treatment as our own DTOs.
+
 ### The diagnostics panel — ILogger made visible
 
 The **logs** toggle on the status bar opens a live slide‑over of the app's own `ILogger` output — retries, hub reconnects, audit failures, catch‑ups. Implementation: one `DiagnosticsLoggerProvider` publishes `DiagnosticEntryMessage` records onto the messenger (UiThreadMessenger marshals off‑thread logs), and `DiagnosticsViewModel` subscribes like any other recipient. The buffer is capped at 400 entries — a tail, not a database. No component knows the panel exists; that's the point of provider boundaries.
@@ -370,25 +434,28 @@ When the SignalR connection recovers from a hard drop, `ChatHubClient` publishes
 ```
 src/
 ├── ColtonStack.Client/        # WPF application
-│   ├── Behaviors/             # Attached behaviors (auto‑scroll, formatting, title bar)
+│   ├── Assets/                # Application icon
+│   ├── Behaviors/             # Attached behaviors (auto‑scroll, formatting, caption buttons, focus, clipboard)
 │   ├── Configuration/         # IOptions<T> from appsettings.json
 │   ├── Converters/            # IValueConverter implementations
-│   ├── Extensions/            # CLIENT PLUGIN SYSTEM — IClientStartup, pane registry, in-box extensions
+│   ├── Extensions/            # CLIENT PLUGIN SYSTEM — IClientStartup + registries (panes, commands, settings, attachments)
+│   │   ├── Audit/             #   in-box extension: audit pane + settings section
+│   │   └── Pokemon/           #   in-box extension: /pokemon command, card renderer, settings section
 │   ├── Legacy/                # THE OLD WORLD — contrast sample only
 │   ├── Messages/              # Record types published through IMessenger
-│   ├── Services/              # Typed HTTP client, SignalR hub client, UI‑thread messenger, log provider
+│   ├── Services/              # API + hub seams (interfaces), settings store, UI‑thread messenger, resilience helper, log provider
 │   ├── Themes/                # Dark theme (no third‑party library)
-│   ├── ViewModels/            # MVVM Toolkit partial classes (primary constructors)
-│   └── Views/                 # XAML — MainWindow + EmojiCatalog view data
-├── ColtonStack.Contracts/     # Shared DTOs, hub contract, JSON source‑gen context
+│   ├── ViewModels/            # MVVM Toolkit partial classes (primary constructors); MessageSearch + SlashCommandInput
+│   └── Views/                 # XAML — MainWindow (WindowChrome title bar + palette) + EmojiCatalog view data
+├── ColtonStack.Contracts/     # Shared DTOs, hub contract, validators, SettingKey, JSON source‑gen context
 ├── ColtonStack.Server/        # ASP.NET Core Minimal API server
 │   ├── Data/                  # Dapper.Contrib row classes (one per table)
-│   ├── Endpoints/             # Minimal API route handlers
-│   ├── Extensions/            # SERVER PLUGIN SYSTEM — IServerStartup + the audit extension
+│   ├── Endpoints/             # Minimal API route handlers + shared EndpointValidation helper
+│   ├── Extensions/            # SERVER PLUGIN SYSTEM — IServerStartup, the audit extension, the Pokémon extension
 │   ├── Hubs/                  # Typed SignalR hub (Hub<IChatHubClient>)
-│   ├── Infrastructure/        # SQLite connection factory, schema init, seed data
-│   ├── Middleware/             # Chaos middleware (demo failure injector)
-│   ├── Services/              # Business logic (ChannelService, MessageService, AuditService)
+│   ├── Infrastructure/        # SQLite connection factory, schema init (+ ISchemaContributor), seed data
+│   ├── Middleware/             # Chaos middleware (demo failure injector) + injected ChaosState
+│   ├── Services/              # Business logic (ChannelService, MessageService, UserService, SettingsService, AuditService)
 │   ├── Simulation/            # Background chat‑activity simulator
 │   └── Webhooks/              # Background webhook dispatcher with retries
 ├── ColtonStack.Tests/         # xUnit tests + executable architecture rules (NetArchTest)

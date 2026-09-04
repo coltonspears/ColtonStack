@@ -3,6 +3,7 @@
     <Project Path="src/ColtonStack.Client/ColtonStack.Client.csproj" />
     <Project Path="src/ColtonStack.Contracts/ColtonStack.Contracts.csproj" />
     <Project Path="src/ColtonStack.Server/ColtonStack.Server.csproj" />
+    <Project Path="src/ColtonStack.Tests/ColtonStack.Tests.csproj" />
     <Project Path="src/ColtonStack.WebhookSink/ColtonStack.WebhookSink.csproj" />
   </Folder>
 </Solution>
